@@ -1,0 +1,173 @@
+import express from 'express'
+import { requireAuth, requireRole } from '../middleware/auth.js'
+import { db } from '../db/client.js'
+import { listMembers, listMembersWithStatus, isCycleParticipant } from '../services/cycle.service.js'
+import { getCurrentPublicCycle, getCurrentWorkCycle, getCycleOverview } from '../services/cycle-lifecycle.service.js'
+import { saveManagerScores } from '../services/score.service.js'
+import { settleCycle, getPublicResults, settlePendingCycles } from '../services/settlement.service.js'
+import {
+  createMember,
+  deactivateSelfIfAllowed,
+  listUsersForDashboard,
+  setCycleParticipation,
+  setUserActive,
+  updateUserRole
+} from '../services/user-admin.service.js'
+
+export const adminRouter = express.Router()
+
+adminRouter.use(requireAuth)
+adminRouter.use((_req, _res, next) => {
+  settlePendingCycles()
+  next()
+})
+
+adminRouter.get('/dashboard', requireRole('admin'), (_req, res) => {
+  const workCycle = getCurrentWorkCycle()
+  const publicCycle = getCurrentPublicCycle()
+  const members = workCycle ? listMembers(workCycle.id) : []
+  const participants = workCycle
+    ? db.prepare(`
+      SELECT u.id, u.full_name
+      FROM users u
+      LEFT JOIN cycle_participants cp ON cp.user_id = u.id AND cp.cycle_id = ?
+      WHERE u.role = 'member'
+        AND u.is_active = 1
+        AND COALESCE(cp.is_participant, 1) = 1
+      ORDER BY u.id ASC
+    `).all(workCycle.id)
+    : []
+  const submissions = workCycle
+    ? db.prepare(`
+      SELECT s.user_id, s.completed_count, s.required_count, s.used_voting_right, s.submitted_at
+      FROM employee_score_submissions s
+      JOIN users u ON u.id = s.user_id
+      LEFT JOIN cycle_participants cp ON cp.user_id = u.id AND cp.cycle_id = s.cycle_id
+      WHERE s.cycle_id = ?
+        AND u.role = 'member'
+        AND COALESCE(cp.is_participant, 1) = 1
+    `).all(workCycle.id)
+    : []
+
+  res.json({
+    cycle: workCycle,
+    publicCycle,
+    overview: getCycleOverview(),
+    employeeCount: participants.length,
+    submittedCount: submissions.filter((item) => item.submitted_at).length,
+    completedCount: submissions.filter((item) => item.completed_count === item.required_count).length,
+    invalidCount: submissions.filter((item) => item.used_voting_right === 0).length,
+    submissions,
+    members: workCycle ? listMembersWithStatus(workCycle.id) : [],
+    users: listUsersForDashboard(workCycle?.id || null)
+  })
+})
+
+adminRouter.get('/leader/current-cycle', requireRole('leader'), (req, res) => {
+  const cycle = getCurrentWorkCycle()
+  if (!cycle) return res.status(404).json({ message: '暂无评分周期' })
+  if (!isCycleParticipant(cycle.id, req.user.id)) {
+    return res.status(403).json({ message: '当前账号未参与本期评分' })
+  }
+
+  const members = listMembers(cycle.id)
+  const scores = db.prepare(`
+    SELECT target_user_id AS targetUserId, score
+    FROM manager_scores
+    WHERE cycle_id = ? AND manager_user_id = ?
+    ORDER BY target_user_id ASC
+  `).all(cycle.id, req.user.id)
+
+  res.json({ cycle, members, scores })
+})
+
+adminRouter.post('/manager-scores', requireRole('leader'), (req, res) => {
+  const cycle = getCurrentWorkCycle()
+  if (!cycle) return res.status(404).json({ message: '暂无评分周期' })
+  if (!isCycleParticipant(cycle.id, req.user.id)) {
+    return res.status(403).json({ message: '当前账号未参与本期评分' })
+  }
+
+  try {
+    const result = saveManagerScores(cycle.id, req.user.id, req.body.scores || [])
+    res.json(result)
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+adminRouter.post('/settle', requireRole('admin'), (req, res) => {
+  const cycleId = req.body?.cycleId ? Number(req.body.cycleId) : null
+  const cycle = cycleId ? getCycleOverview().history.find((item) => item.id === cycleId) || null : getCurrentWorkCycle()
+  const targetCycle = cycleId ? db.prepare('SELECT * FROM rating_cycles WHERE id = ?').get(cycleId) : cycle
+  if (!targetCycle) return res.status(404).json({ message: '暂无评分周期' })
+
+  try {
+    res.json(settleCycle(targetCycle.id, 'manual'))
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+adminRouter.post('/settle/automatic', requireRole('admin'), (_req, res) => {
+  res.json({ settled: settlePendingCycles() })
+})
+
+adminRouter.get('/results', requireRole('admin'), (_req, res) => {
+  const cycle = getCurrentPublicCycle() || getCurrentWorkCycle()
+  if (!cycle) return res.status(404).json({ message: '暂无评分周期' })
+  res.json({ cycle, ...getPublicResults(cycle.id) })
+})
+
+adminRouter.post('/members', requireRole('admin'), (req, res) => {
+  try {
+    const member = createMember({
+      username: req.body.username,
+      fullName: req.body.fullName,
+      password: req.body.password
+    })
+    res.json({ member })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+adminRouter.patch('/users/:id/role', requireRole('admin'), (req, res) => {
+  try {
+    const user = updateUserRole(Number(req.params.id), req.body?.role, req.user.id)
+    res.json({ user })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+adminRouter.patch('/users/:id/active', requireRole('admin'), (req, res) => {
+  try {
+    const isActive = Number(req.body?.isActive ? 1 : 0)
+    const user = setUserActive(Number(req.params.id), isActive, req.user.id)
+    res.json({ user })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+adminRouter.patch('/users/:id/participation', requireRole('admin'), (req, res) => {
+  const cycle = getCurrentWorkCycle()
+  if (!cycle) return res.status(404).json({ message: '暂无评分周期' })
+
+  try {
+    const result = setCycleParticipation(cycle.id, Number(req.params.id), Boolean(req.body?.isParticipant))
+    res.json(result)
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+adminRouter.post('/self/deactivate', requireRole('admin'), (req, res) => {
+  try {
+    const user = deactivateSelfIfAllowed(req.user.id)
+    res.json({ user })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
