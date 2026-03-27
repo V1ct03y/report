@@ -1,14 +1,16 @@
 import { db } from '../db/client.js'
-import { normalizeCycleStatuses, normalizeLocalDateTimeInput } from './cycle-lifecycle.service.js'
-import { updateSchedulingConfig } from './scheduling.service.js'
+import {
+  listCycles,
+  normalizeLocalDateTimeInput,
+  reconcileCycleTimeline
+} from './cycle-lifecycle.service.js'
 
 function makeWeekName(weekNumber) {
   return `第${weekNumber}周工作评分`
 }
 
 export function listAllCycles() {
-  normalizeCycleStatuses()
-  return db.prepare('SELECT * FROM rating_cycles ORDER BY week_number ASC, id ASC').all()
+  return listCycles()
 }
 
 export function createCycle({ name, start_at, end_at }) {
@@ -30,8 +32,7 @@ export function createCycle({ name, start_at, end_at }) {
     VALUES (?, ?, ?, ?, 'draft', NULL, 0, 'manual')
   `).run(resolvedName, maxWeek + 1, normalizedStartAt, normalizedEndAt)
 
-  updateSchedulingConfig({ enabled: 0 })
-
+  reconcileCycleTimeline()
   return db.prepare('SELECT * FROM rating_cycles WHERE id = ?').get(result.lastInsertRowid)
 }
 
@@ -51,7 +52,7 @@ export function updateCycle(id, { name, start_at, end_at }) {
   values.push(id)
   db.prepare(`UPDATE rating_cycles SET ${fields.join(', ')} WHERE id = ?`).run(...values)
 
-  normalizeCycleStatuses(currentSqlTimestamp())
+  reconcileCycleTimeline()
 
   return db.prepare('SELECT * FROM rating_cycles WHERE id = ?').get(id)
 }
@@ -66,12 +67,7 @@ export function deleteCycle(id) {
 
   db.prepare('DELETE FROM rating_cycles WHERE id = ?').run(id)
 
-  normalizeCycleStatuses(currentSqlTimestamp())
-
-  const remaining = db.prepare('SELECT * FROM rating_cycles WHERE status IN (\'draft\', \'active\', \'closed\')').all()
-  if (!remaining.length) {
-    updateSchedulingConfig({ enabled: 1 })
-  }
+  reconcileCycleTimeline()
 
   return { ok: true }
 }

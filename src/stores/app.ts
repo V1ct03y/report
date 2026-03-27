@@ -5,6 +5,8 @@ import dayjs from 'dayjs'
 import { api, clearToken, setToken } from '../api'
 import type {
   Account,
+  AdminCycleControl,
+  AdminCycleRecord,
   CycleOverview,
   CycleRecord,
   CycleSummary,
@@ -25,6 +27,17 @@ function emptyOverview(): CycleOverview {
     workCycle: null,
     displayCycle: null,
     upcomingCycle: null,
+    history: []
+  }
+}
+
+function emptyAdminCycleControl(): AdminCycleControl {
+  return {
+    currentCycle: null,
+    upcomingCycle: null,
+    publishedCycle: null,
+    pendingPublicationCycle: null,
+    displayCycle: null,
     history: []
   }
 }
@@ -54,7 +67,22 @@ function normalizeCycle(raw: any): CycleRecord | null {
     settled_at: raw.settled_at || null,
     settle_mode: raw.settle_mode || null,
     public_at: raw.public_at || null,
+    published_at: raw.published_at || raw.public_at || null,
+    archived_at: raw.archived_at || null,
     is_archived: Number(raw.is_archived || 0)
+  }
+}
+
+function normalizeAdminCycle(raw: any): AdminCycleRecord | null {
+  const cycle = normalizeCycle(raw)
+  if (!cycle) return null
+  return {
+    ...cycle,
+    published_at: cycle.published_at ?? null,
+    archived_at: cycle.archived_at ?? null,
+    phase: raw.phase || 'planned',
+    isPublished: Boolean(raw.isPublished ?? cycle.published_at),
+    isArchived: Boolean(raw.isArchived ?? cycle.archived_at ?? cycle.is_archived)
   }
 }
 
@@ -65,6 +93,17 @@ function normalizeOverview(raw: any): CycleOverview {
     displayCycle: normalizeCycle(raw?.displayCycle),
     upcomingCycle: normalizeCycle(raw?.upcomingCycle),
     history: Array.isArray(raw?.history) ? raw.history.map((item: any) => normalizeCycle(item)).filter(Boolean) as CycleRecord[] : []
+  }
+}
+
+function normalizeAdminCycleControl(raw: any): AdminCycleControl {
+  return {
+    currentCycle: normalizeAdminCycle(raw?.currentCycle),
+    upcomingCycle: normalizeAdminCycle(raw?.upcomingCycle),
+    publishedCycle: normalizeAdminCycle(raw?.publishedCycle),
+    pendingPublicationCycle: normalizeAdminCycle(raw?.pendingPublicationCycle),
+    displayCycle: normalizeAdminCycle(raw?.displayCycle),
+    history: Array.isArray(raw?.history) ? raw.history.map((item: any) => normalizeAdminCycle(item)).filter(Boolean) as AdminCycleRecord[] : []
   }
 }
 
@@ -161,6 +200,7 @@ export const useAppStore = defineStore('app', () => {
   const members = ref<MemberRecord[]>([])
   const users = ref<MemberRecord[]>([])
   const cycleOverview = ref<CycleOverview>(emptyOverview())
+  const adminCycleControl = ref<AdminCycleControl>(emptyAdminCycleControl())
   const historyCycles = ref<CycleRecord[]>([])
   const schedulingConfig = ref<SchedulingConfig | null>(null)
   const allCycles = ref<CycleRecord[]>([])
@@ -192,6 +232,10 @@ export const useAppStore = defineStore('app', () => {
     cycle.value = overview.workCycle
     publicCycle.value = overview.publicCycle
     historyCycles.value = overview.history
+  }
+
+  function syncAdminCycleControl(raw: any) {
+    adminCycleControl.value = normalizeAdminCycleControl(raw)
   }
 
   function rebuildSummary() {
@@ -346,8 +390,22 @@ export const useAppStore = defineStore('app', () => {
     applyPublicResults(payload)
   }
 
+  async function loadAdminCycleControl() {
+    const payload = await api.getAdminCycleControl()
+    syncAdminCycleControl(payload)
+    return payload
+  }
+
   async function loadPublicResults() {
     try {
+      if (currentAccount.value?.role === 'admin' || currentAccount.value?.role === 'leader') {
+        const payload = currentAccount.value.role === 'admin'
+          ? await api.getAdminResults()
+          : await api.getCurrentPublicCycle()
+        applyPublicResults(payload)
+        return
+      }
+
       await loadCurrentPublicResults()
     } catch {
       results.value = []
@@ -360,6 +418,7 @@ export const useAppStore = defineStore('app', () => {
     const payload = await api.getAdminDashboard()
     dashboard.value = payload
     syncOverview(payload?.overview || emptyOverview())
+    syncAdminCycleControl(payload?.cycleControl || emptyAdminCycleControl())
     cycle.value = normalizeCycle(payload?.cycle)
     publicCycle.value = normalizeCycle(payload?.publicCycle)
     members.value = (payload?.members || []) as MemberRecord[]
@@ -473,7 +532,8 @@ export const useAppStore = defineStore('app', () => {
   async function settleCycle(cycleId?: number) {
     const payload = await api.settle(cycleId)
     await loadCycleOverview()
-    applyPublicResults({ ...payload, isPublished: true })
+    await loadAdminCycleControl().catch(() => undefined)
+    applyPublicResults(payload)
     if (currentAccount.value?.role === 'admin') {
       await loadDashboard().catch(() => undefined)
     }
@@ -483,7 +543,39 @@ export const useAppStore = defineStore('app', () => {
   async function triggerAutomaticSettlement() {
     const payload = await api.settleAutomatic()
     await loadCycleOverview()
+    await loadAdminCycleControl().catch(() => undefined)
     await loadPublicResults().catch(() => undefined)
+    return payload
+  }
+
+  async function publishCycleResults(id: number) {
+    const payload = await api.publishCycle(id)
+    await loadCycleOverview()
+    await loadAdminCycleControl().catch(() => undefined)
+    applyPublicResults(payload)
+    if (currentAccount.value?.role === 'admin') {
+      await loadDashboard().catch(() => undefined)
+    }
+    return payload
+  }
+
+  async function archiveCycleResults(id: number) {
+    const payload = await api.archiveCycle(id)
+    await loadCycleOverview()
+    await loadAdminCycleControl().catch(() => undefined)
+    if (currentAccount.value?.role === 'admin') {
+      await loadDashboard().catch(() => undefined)
+    }
+    return payload
+  }
+
+  async function reconcileAdminCycles() {
+    const payload = await api.reconcileAdminCycleControl()
+    syncAdminCycleControl(payload)
+    await loadCycleOverview()
+    if (currentAccount.value?.role === 'admin') {
+      await loadDashboard().catch(() => undefined)
+    }
     return payload
   }
 
@@ -529,6 +621,7 @@ export const useAppStore = defineStore('app', () => {
     await api.createCycle(payload)
     await loadAllCycles()
     await loadCycleOverview()
+    await loadAdminCycleControl().catch(() => undefined)
     await loadDashboard()
   }
 
@@ -536,6 +629,7 @@ export const useAppStore = defineStore('app', () => {
     await api.updateCycle(id, payload)
     await loadAllCycles()
     await loadCycleOverview()
+    await loadAdminCycleControl().catch(() => undefined)
     await loadDashboard()
   }
 
@@ -543,6 +637,7 @@ export const useAppStore = defineStore('app', () => {
     await api.deleteCycle(id)
     await loadAllCycles()
     await loadCycleOverview()
+    await loadAdminCycleControl().catch(() => undefined)
     await loadDashboard()
   }
 
@@ -570,6 +665,7 @@ export const useAppStore = defineStore('app', () => {
     members,
     users,
     cycleOverview,
+    adminCycleControl,
     historyCycles,
     schedulingConfig,
     allCycles,
@@ -585,6 +681,8 @@ export const useAppStore = defineStore('app', () => {
     submitLeaderScores,
     settleCycle,
     triggerAutomaticSettlement,
+    publishCycleResults,
+    archiveCycleResults,
     createMember,
     changeUserRole,
     changeUserParticipation,
@@ -600,6 +698,8 @@ export const useAppStore = defineStore('app', () => {
     loadLeaderCycle,
     loadPublicResults,
     loadCycleOverview,
+    loadAdminCycleControl,
+    reconcileAdminCycles,
     loadDashboard,
     quickLogin
   }

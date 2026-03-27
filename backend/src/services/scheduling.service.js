@@ -1,6 +1,6 @@
 import cron from 'node-cron'
 import { db } from '../db/client.js'
-import { currentSqlTimestamp } from './cycle-lifecycle.service.js'
+import { currentSqlTimestamp, reconcileCycleTimeline } from './cycle-lifecycle.service.js'
 import { settleCycle } from './settlement.service.js'
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -211,6 +211,7 @@ export function startScheduler() {
   if (schedulerTask) return
   schedulerTask = cron.schedule('* * * * *', () => {
     const config = getSchedulingConfig()
+    reconcileCycleTimeline(currentSqlTimestamp())
     if (!config.enabled) return
 
     const now = new Date()
@@ -240,6 +241,7 @@ export function startScheduler() {
       }
     }
   })
+  reconcileCycleTimeline(currentSqlTimestamp())
   console.log('[Scheduler] Cron job started')
 }
 

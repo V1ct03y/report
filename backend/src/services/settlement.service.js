@@ -1,6 +1,5 @@
 import { db } from '../db/client.js'
 import {
-  archiveOlderPublicCycles,
   currentSqlTimestamp,
   findAutomaticSettlementCandidates,
   getCycleById
@@ -107,14 +106,10 @@ export function settleCycle(cycleId, settleMode = 'manual', settledAt = currentS
       UPDATE rating_cycles
       SET status = 'settled',
           settled_at = ?,
-          public_at = ?,
           settle_mode = ?,
-          is_archived = 0,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(settledAt, settledAt, settleMode, cycleId)
-
-    archiveOlderPublicCycles(cycleId)
+    `).run(settledAt, settleMode, cycleId)
   })
 
   tx()

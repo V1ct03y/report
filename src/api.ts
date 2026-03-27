@@ -51,6 +51,12 @@ export const api = {
   getAdminDashboard() {
     return request('/admin/dashboard')
   },
+  getAdminCycleControl() {
+    return request('/admin/cycle-control')
+  },
+  reconcileAdminCycleControl() {
+    return request('/admin/cycle-control/reconcile', { method: 'POST' })
+  },
   getLeaderCurrentCycle() {
     return request('/admin/leader/current-cycle')
   },
@@ -71,6 +77,12 @@ export const api = {
   },
   getAdminResults() {
     return request('/admin/results')
+  },
+  publishCycle(id: number) {
+    return request(`/admin/cycles/${id}/publish`, { method: 'POST' })
+  },
+  archiveCycle(id: number) {
+    return request(`/admin/cycles/${id}/archive`, { method: 'POST' })
   },
   createMember(payload: { username: string; fullName: string; password: string }) {
     return request('/admin/members', {

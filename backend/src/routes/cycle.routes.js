@@ -1,57 +1,59 @@
 import express from 'express'
 import { requireAuth } from '../middleware/auth.js'
 import {
-  getCurrentPublicCycle,
-  getCurrentWorkCycle,
+  getCurrentPublicCyclePure,
+  getCurrentWorkCyclePure,
   getCycleById,
-  getCycleOverview,
-  listCycleHistory
+  getCycleOverviewPure,
+  listCycleHistoryPure
 } from '../services/cycle-lifecycle.service.js'
-import { getPublicResults, settlePendingCycles } from '../services/settlement.service.js'
+import { getPublicResults } from '../services/settlement.service.js'
 
 export const cycleRouter = express.Router()
 
 cycleRouter.use(requireAuth)
 
-cycleRouter.use((_req, _res, next) => {
-  settlePendingCycles()
-  next()
-})
-
 cycleRouter.get('/overview', (_req, res) => {
-  res.json(getCycleOverview())
+  res.json(getCycleOverviewPure())
 })
 
 cycleRouter.get('/current', (_req, res) => {
-  res.json({ cycle: getCycleOverview().displayCycle })
+  res.json({ cycle: getCycleOverviewPure().displayCycle })
 })
 
 cycleRouter.get('/current/work', (_req, res) => {
-  res.json({ cycle: getCurrentWorkCycle() })
+  res.json({ cycle: getCurrentWorkCyclePure() })
 })
 
 cycleRouter.get('/current/public', (_req, res) => {
-  const overview = getCycleOverview()
-  const cycle = overview.displayCycle
-  if (!cycle) return res.json({ cycle: null, employees: [], matrix: [], ranking: [], isPublished: false })
+  const cycle = getCurrentPublicCyclePure()
+  if (!cycle) {
+    return res.json({
+      cycle: null,
+      employees: [],
+      matrix: [],
+      ranking: [],
+      isPublished: false
+    })
+  }
 
   res.json({
     cycle,
     ...getPublicResults(cycle.id),
-    isPublished: Boolean(overview.publicCycle && overview.publicCycle.id === cycle.id)
+    isPublished: true
   })
 })
 
 cycleRouter.get('/history', (_req, res) => {
-  res.json({ cycles: listCycleHistory() })
+  res.json({ cycles: listCycleHistoryPure() })
 })
 
 cycleRouter.get('/:id/results', (req, res) => {
   const cycle = getCycleById(Number(req.params.id))
-  if (!cycle) return res.status(404).json({ message: '周期不存在' })
+  if (!cycle) return res.status(404).json({ message: '鍛ㄦ湡涓嶅瓨鍦?' })
   res.json({
     cycle,
     ...getPublicResults(cycle.id),
-    isPublished: cycle.status === 'settled' && Boolean(cycle.public_at)
+    isPublished: Boolean(cycle.published_at)
   })
 })

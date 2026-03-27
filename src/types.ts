@@ -31,6 +31,7 @@ export interface EmployeeSubmission {
 }
 
 export type CycleStatus = 'draft' | 'active' | 'closed' | 'settled'
+export type AdminCyclePhase = 'planned' | 'open' | 'closed' | 'settled' | 'published' | 'archived'
 export type ScoreMap = Record<string, number | null>
 export type EmployeeScoreBook = Record<string, ScoreMap>
 export type LeaderScoreBook = Record<string, Record<string, number>>
@@ -45,7 +46,17 @@ export interface CycleRecord {
   settled_at: string | null
   settle_mode: 'manual' | 'automatic' | null
   public_at: string | null
+  published_at?: string | null
+  archived_at?: string | null
   is_archived: number
+}
+
+export interface AdminCycleRecord extends CycleRecord {
+  phase: AdminCyclePhase
+  isPublished: boolean
+  isArchived: boolean
+  published_at: string | null
+  archived_at: string | null
 }
 
 export interface CycleOverview {
@@ -54,6 +65,15 @@ export interface CycleOverview {
   displayCycle: CycleRecord | null
   upcomingCycle: CycleRecord | null
   history: CycleRecord[]
+}
+
+export interface AdminCycleControl {
+  currentCycle: AdminCycleRecord | null
+  upcomingCycle: AdminCycleRecord | null
+  publishedCycle: AdminCycleRecord | null
+  pendingPublicationCycle: AdminCycleRecord | null
+  displayCycle: AdminCycleRecord | null
+  history: AdminCycleRecord[]
 }
 
 export interface EmployeeResult {

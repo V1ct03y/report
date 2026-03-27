@@ -1,6 +1,6 @@
 import { db } from '../db/client.js'
 import { hashPassword } from '../utils/crypto.js'
-import { getCurrentWorkCycle } from './cycle-lifecycle.service.js'
+import { getCurrentWorkCyclePure } from './cycle-lifecycle.service.js'
 
 const VALID_ROLES = new Set(['admin', 'leader', 'member'])
 
@@ -11,7 +11,7 @@ function normalizeRole(role) {
 }
 
 export function listUsersForDashboard(cycleId = null) {
-  const activeCycleId = cycleId || getCurrentWorkCycle()?.id || null
+  const activeCycleId = cycleId || getCurrentWorkCyclePure()?.id || null
 
   return db.prepare(`
     SELECT u.id,

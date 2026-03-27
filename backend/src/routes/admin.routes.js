@@ -2,7 +2,12 @@ import express from 'express'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { db } from '../db/client.js'
 import { listMembers, listMembersWithStatus, isCycleParticipant } from '../services/cycle.service.js'
-import { getCurrentPublicCycle, getCurrentWorkCycle, getCycleOverview } from '../services/cycle-lifecycle.service.js'
+import {
+  getCycleById,
+  getCycleOverviewPure,
+  getCurrentPublicCyclePure,
+  getCurrentWorkCyclePure
+} from '../services/cycle-lifecycle.service.js'
 import { saveManagerScores } from '../services/score.service.js'
 import { settleCycle, getPublicResults, settlePendingCycles } from '../services/settlement.service.js'
 import {
@@ -11,6 +16,13 @@ import {
   updateCycle,
   deleteCycle
 } from '../services/cycle-admin.service.js'
+import {
+  archiveCycle,
+  getAdminCycleControl,
+  getAdminResultsCycle,
+  publishCycle,
+  reconcileCycleTimeline
+} from '../services/cycle-control.service.js'
 import {
   getSchedulingConfig,
   updateSchedulingConfig,
@@ -29,15 +41,10 @@ import {
 export const adminRouter = express.Router()
 
 adminRouter.use(requireAuth)
-adminRouter.use((_req, _res, next) => {
-  settlePendingCycles()
-  next()
-})
 
 adminRouter.get('/dashboard', requireRole('admin'), (_req, res) => {
-  const workCycle = getCurrentWorkCycle()
-  const publicCycle = getCurrentPublicCycle()
-  const members = workCycle ? listMembers(workCycle.id) : []
+  const workCycle = getCurrentWorkCyclePure()
+  const publicCycle = getCurrentPublicCyclePure()
   const participants = workCycle
     ? db.prepare(`
       SELECT u.id, u.full_name
@@ -64,7 +71,8 @@ adminRouter.get('/dashboard', requireRole('admin'), (_req, res) => {
   res.json({
     cycle: workCycle,
     publicCycle,
-    overview: getCycleOverview(),
+    overview: getCycleOverviewPure(),
+    cycleControl: getAdminCycleControl(),
     employeeCount: participants.length,
     submittedCount: submissions.filter((item) => item.submitted_at).length,
     completedCount: submissions.filter((item) => item.completed_count === item.required_count).length,
@@ -75,11 +83,20 @@ adminRouter.get('/dashboard', requireRole('admin'), (_req, res) => {
   })
 })
 
+adminRouter.get('/cycle-control', requireRole('admin'), (_req, res) => {
+  res.json(getAdminCycleControl())
+})
+
+adminRouter.post('/cycle-control/reconcile', requireRole('admin'), (_req, res) => {
+  reconcileCycleTimeline()
+  res.json(getAdminCycleControl())
+})
+
 adminRouter.get('/leader/current-cycle', requireRole('leader'), (req, res) => {
-  const cycle = getCurrentWorkCycle()
-  if (!cycle) return res.status(404).json({ message: '暂无评分周期' })
+  const cycle = getCurrentWorkCyclePure()
+  if (!cycle) return res.status(404).json({ message: '鏆傛棤璇勫垎鍛ㄦ湡' })
   if (!isCycleParticipant(cycle.id, req.user.id)) {
-    return res.status(403).json({ message: '当前账号未参与本期评分' })
+    return res.status(403).json({ message: '褰撳墠璐﹀彿鏈弬涓庢湰鏈熻瘎鍒?' })
   }
 
   const members = listMembers(cycle.id)
@@ -94,10 +111,10 @@ adminRouter.get('/leader/current-cycle', requireRole('leader'), (req, res) => {
 })
 
 adminRouter.post('/manager-scores', requireRole('leader'), (req, res) => {
-  const cycle = getCurrentWorkCycle()
-  if (!cycle) return res.status(404).json({ message: '暂无评分周期' })
+  const cycle = getCurrentWorkCyclePure()
+  if (!cycle) return res.status(404).json({ message: '鏆傛棤璇勫垎鍛ㄦ湡' })
   if (!isCycleParticipant(cycle.id, req.user.id)) {
-    return res.status(403).json({ message: '当前账号未参与本期评分' })
+    return res.status(403).json({ message: '褰撳墠璐﹀彿鏈弬涓庢湰鏈熻瘎鍒?' })
   }
 
   try {
@@ -110,12 +127,16 @@ adminRouter.post('/manager-scores', requireRole('leader'), (req, res) => {
 
 adminRouter.post('/settle', requireRole('admin'), (req, res) => {
   const cycleId = req.body?.cycleId ? Number(req.body.cycleId) : null
-  const cycle = cycleId ? getCycleOverview().history.find((item) => item.id === cycleId) || null : getCurrentWorkCycle()
-  const targetCycle = cycleId ? db.prepare('SELECT * FROM rating_cycles WHERE id = ?').get(cycleId) : cycle
-  if (!targetCycle) return res.status(404).json({ message: '暂无评分周期' })
+  const targetCycle = cycleId ? getCycleById(cycleId) : getCurrentWorkCyclePure()
+  if (!targetCycle) return res.status(404).json({ message: '鏆傛棤璇勫垎鍛ㄦ湡' })
 
   try {
-    res.json(settleCycle(targetCycle.id, 'manual'))
+    const results = settleCycle(targetCycle.id, 'manual')
+    res.json({
+      cycle: getCycleById(targetCycle.id),
+      ...results,
+      isPublished: false
+    })
   } catch (error) {
     res.status(400).json({ message: error.message })
   }
@@ -125,10 +146,36 @@ adminRouter.post('/settle/automatic', requireRole('admin'), (_req, res) => {
   res.json({ settled: settlePendingCycles() })
 })
 
+adminRouter.post('/cycles/:id/publish', requireRole('admin'), (req, res) => {
+  try {
+    const cycle = publishCycle(Number(req.params.id))
+    res.json({
+      cycle,
+      ...getPublicResults(cycle.id),
+      isPublished: true
+    })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+adminRouter.post('/cycles/:id/archive', requireRole('admin'), (req, res) => {
+  try {
+    const cycle = archiveCycle(Number(req.params.id))
+    res.json({ cycle })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
 adminRouter.get('/results', requireRole('admin'), (_req, res) => {
-  const cycle = getCurrentPublicCycle() || getCurrentWorkCycle()
-  if (!cycle) return res.status(404).json({ message: '暂无评分周期' })
-  res.json({ cycle, ...getPublicResults(cycle.id) })
+  const cycle = getAdminResultsCycle() || getCurrentWorkCyclePure()
+  if (!cycle) return res.status(404).json({ message: '鏆傛棤璇勫垎鍛ㄦ湡' })
+  res.json({
+    cycle,
+    ...getPublicResults(cycle.id),
+    isPublished: Boolean(cycle.published_at)
+  })
 })
 
 adminRouter.post('/members', requireRole('admin'), (req, res) => {
@@ -164,8 +211,8 @@ adminRouter.patch('/users/:id/active', requireRole('admin'), (req, res) => {
 })
 
 adminRouter.patch('/users/:id/participation', requireRole('admin'), (req, res) => {
-  const cycle = getCurrentWorkCycle()
-  if (!cycle) return res.status(404).json({ message: '暂无评分周期' })
+  const cycle = getCurrentWorkCyclePure()
+  if (!cycle) return res.status(404).json({ message: '鏆傛棤璇勫垎鍛ㄦ湡' })
 
   try {
     const result = setCycleParticipation(cycle.id, Number(req.params.id), Boolean(req.body?.isParticipant))
@@ -183,8 +230,6 @@ adminRouter.post('/self/deactivate', requireRole('admin'), (req, res) => {
     res.status(400).json({ message: error.message })
   }
 })
-
-// ─── Scheduling config ───────────────────────────────────────────────────────
 
 adminRouter.get('/scheduling', requireRole('admin'), (_req, res) => {
   const config = getSchedulingConfig()
@@ -211,8 +256,6 @@ adminRouter.patch('/scheduling', requireRole('admin'), (req, res) => {
     res.status(400).json({ message: error.message })
   }
 })
-
-// ─── Cycle CRUD ───────────────────────────────────────────────────────────────
 
 adminRouter.get('/cycles', requireRole('admin'), (_req, res) => {
   res.json({ cycles: listAllCycles() })

@@ -16,6 +16,29 @@ function formatSqlTime(date) {
   return currentSqlTimestamp(date)
 }
 
+function getPublishedAt(cycle) {
+  return cycle?.published_at ?? cycle?.public_at ?? null
+}
+
+function getArchivedAt(cycle) {
+  if (!cycle) return null
+  if (cycle.archived_at) return cycle.archived_at
+  return Number(cycle.is_archived) === 1 ? (cycle.updated_at ?? null) : null
+}
+
+function isArchivedCycle(cycle) {
+  return Boolean(getArchivedAt(cycle) || Number(cycle?.is_archived) === 1)
+}
+
+function withPublicationState(cycle) {
+  if (!cycle) return null
+  return {
+    ...cycle,
+    published_at: getPublishedAt(cycle),
+    archived_at: getArchivedAt(cycle)
+  }
+}
+
 export function normalizeLocalDateTimeInput(raw) {
   if (raw == null) return null
   const value = String(raw).trim()
@@ -70,7 +93,19 @@ export function safeEnsureCycleColumns() {
   if (!columns.includes('settle_mode')) alters.push("ALTER TABLE rating_cycles ADD COLUMN settle_mode TEXT DEFAULT 'automatic'")
   if (!columns.includes('public_at')) alters.push("ALTER TABLE rating_cycles ADD COLUMN public_at TEXT")
   if (!columns.includes('is_archived')) alters.push("ALTER TABLE rating_cycles ADD COLUMN is_archived INTEGER DEFAULT 0")
+  if (!columns.includes('published_at')) alters.push("ALTER TABLE rating_cycles ADD COLUMN published_at TEXT")
+  if (!columns.includes('archived_at')) alters.push("ALTER TABLE rating_cycles ADD COLUMN archived_at TEXT")
   for (const sql of alters) db.exec(sql)
+
+  db.exec(`
+    UPDATE rating_cycles
+    SET published_at = COALESCE(published_at, public_at),
+        archived_at = CASE
+          WHEN archived_at IS NOT NULL THEN archived_at
+          WHEN is_archived = 1 THEN updated_at
+          ELSE NULL
+        END
+  `)
 }
 
 export function seedWeeklyCycles() {
@@ -129,7 +164,7 @@ export function ensureUpcomingCycle(now = currentSqlTimestamp()) {
   return created
 }
 
-export function normalizeCycleStatuses(now = currentSqlTimestamp()) {
+export function reconcileCycleTimeline(now = currentSqlTimestamp()) {
   ensureUpcomingCycle(now)
 
   const tx = db.transaction(() => {
@@ -154,40 +189,64 @@ export function normalizeCycleStatuses(now = currentSqlTimestamp()) {
   tx()
 }
 
+export function normalizeCycleStatuses(now = currentSqlTimestamp()) {
+  reconcileCycleTimeline(now)
+}
+
 export function listCycles() {
   return db.prepare('SELECT * FROM rating_cycles ORDER BY week_number ASC, id ASC').all()
 }
 
-export function listCycleHistory() {
+export function listCycleHistoryPure() {
   return db.prepare(`
     SELECT * FROM rating_cycles
-    WHERE status = 'settled' AND is_archived = 1
+    WHERE status = 'settled'
+      AND (archived_at IS NOT NULL OR is_archived = 1)
     ORDER BY week_number DESC, id DESC
-  `).all()
+  `).all().map(withPublicationState)
+}
+
+export function listCycleHistory() {
+  return listCycleHistoryPure()
+}
+
+export function getCurrentWorkCyclePure() {
+  return withPublicationState(
+    db.prepare(`
+      SELECT * FROM rating_cycles
+      WHERE status IN ('draft', 'active', 'closed')
+      ORDER BY week_number ASC, id ASC
+      LIMIT 1
+    `).get() || null
+  )
 }
 
 export function getCurrentWorkCycle(now = currentSqlTimestamp()) {
   normalizeCycleStatuses(now)
-  return db.prepare(`
-    SELECT * FROM rating_cycles
-    WHERE status IN ('draft', 'active', 'closed')
-    ORDER BY week_number ASC, id ASC
-    LIMIT 1
-  `).get() || null
+  return getCurrentWorkCyclePure()
+}
+
+export function getCurrentPublicCyclePure() {
+  return withPublicationState(
+    db.prepare(`
+      SELECT * FROM rating_cycles
+      WHERE status = 'settled'
+        AND COALESCE(published_at, public_at) IS NOT NULL
+        AND archived_at IS NULL
+        AND COALESCE(is_archived, 0) = 0
+      ORDER BY week_number DESC, id DESC
+      LIMIT 1
+    `).get() || null
+  )
 }
 
 export function getCurrentPublicCycle() {
-  return db.prepare(`
-    SELECT * FROM rating_cycles
-    WHERE status = 'settled' AND public_at IS NOT NULL AND is_archived = 0
-    ORDER BY week_number DESC, id DESC
-    LIMIT 1
-  `).get() || null
+  return getCurrentPublicCyclePure()
 }
 
-export function getDisplayCycle(now = currentSqlTimestamp()) {
-  const publicCycle = getCurrentPublicCycle()
-  const workCycle = getCurrentWorkCycle(now)
+export function getDisplayCyclePure(now = currentSqlTimestamp()) {
+  const publicCycle = getCurrentPublicCyclePure()
+  const workCycle = getCurrentWorkCyclePure()
   const hasStartedWorkPhase = Boolean(
     workCycle &&
     workCycle.start_at &&
@@ -206,16 +265,27 @@ export function getDisplayCycle(now = currentSqlTimestamp()) {
   return workCycle
 }
 
-export function getUpcomingCycle(now = currentSqlTimestamp()) {
-  const workCycle = getCurrentWorkCycle(now)
+export function getDisplayCycle(now = currentSqlTimestamp()) {
+  return getDisplayCyclePure(now)
+}
+
+export function getUpcomingCyclePure(now = currentSqlTimestamp()) {
+  const workCycle = getCurrentWorkCyclePure()
   if (!workCycle) return null
 
-  return db.prepare(`
-    SELECT * FROM rating_cycles
-    WHERE week_number > ?
-    ORDER BY week_number ASC, id ASC
-    LIMIT 1
-  `).get(workCycle.week_number) || null
+  return withPublicationState(
+    db.prepare(`
+      SELECT * FROM rating_cycles
+      WHERE week_number > ?
+      ORDER BY week_number ASC, id ASC
+      LIMIT 1
+    `).get(workCycle.week_number) || null
+  )
+}
+
+export function getUpcomingCycle(now = currentSqlTimestamp()) {
+  normalizeCycleStatuses(now)
+  return getUpcomingCyclePure(now)
 }
 
 export function getCurrentCycle(now = currentSqlTimestamp()) {
@@ -223,42 +293,51 @@ export function getCurrentCycle(now = currentSqlTimestamp()) {
 }
 
 export function getCycleById(id) {
-  return db.prepare('SELECT * FROM rating_cycles WHERE id = ?').get(id)
+  return withPublicationState(db.prepare('SELECT * FROM rating_cycles WHERE id = ?').get(id) || null)
 }
 
 export function archiveOlderPublicCycles(keepCycleId) {
   const cycle = getCycleById(keepCycleId)
   if (!cycle) return
+  const archivedAt = currentSqlTimestamp()
 
   const tx = db.transaction(() => {
     db.prepare(`
       UPDATE rating_cycles
       SET is_archived = CASE WHEN id = ? THEN 0 ELSE 1 END,
+          archived_at = CASE WHEN id = ? THEN NULL ELSE COALESCE(archived_at, ?) END,
           updated_at = CURRENT_TIMESTAMP
-      WHERE status = 'settled' AND public_at IS NOT NULL AND week_number <= ?
-    `).run(keepCycleId, cycle.week_number)
+      WHERE status = 'settled'
+        AND COALESCE(published_at, public_at) IS NOT NULL
+        AND week_number <= ?
+    `).run(keepCycleId, keepCycleId, archivedAt, cycle.week_number)
   })
 
   tx()
 }
 
-export function getCycleOverview(now = currentSqlTimestamp()) {
-  const publicCycle = getCurrentPublicCycle()
-  const workCycle = getCurrentWorkCycle(now)
-  const upcomingCycle = getUpcomingCycle(now)
-  const history = listCycleHistory()
+export function getCycleOverviewPure(now = currentSqlTimestamp()) {
+  const publicCycle = getCurrentPublicCyclePure()
+  const workCycle = getCurrentWorkCyclePure()
+  const upcomingCycle = getUpcomingCyclePure(now)
+  const history = listCycleHistoryPure()
 
   return {
     publicCycle,
     workCycle,
-    displayCycle: getDisplayCycle(now),
+    displayCycle: getDisplayCyclePure(now),
     upcomingCycle,
     history
   }
 }
 
-export function findAutomaticSettlementCandidates(now = currentSqlTimestamp()) {
+export function getCycleOverview(now = currentSqlTimestamp()) {
   normalizeCycleStatuses(now)
+  return getCycleOverviewPure(now)
+}
+
+export function findAutomaticSettlementCandidates(now = currentSqlTimestamp()) {
+  reconcileCycleTimeline(now)
   return db.prepare(`
     SELECT * FROM rating_cycles
     WHERE status IN ('draft', 'active', 'closed')
