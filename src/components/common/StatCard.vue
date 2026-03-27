@@ -2,7 +2,7 @@
 defineProps<{
   title: string
   value: string | number
-  detail: string
+  detail?: string
 }>()
 </script>
 
@@ -10,7 +10,7 @@ defineProps<{
   <article class="stat-card">
     <p class="stat-card__title">{{ title }}</p>
     <strong class="stat-card__value">{{ value }}</strong>
-    <p class="stat-card__detail">{{ detail }}</p>
+    <p v-if="detail" class="stat-card__detail">{{ detail }}</p>
   </article>
 </template>
 

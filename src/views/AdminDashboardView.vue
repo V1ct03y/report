@@ -88,11 +88,12 @@ function cycleMetaText(cycle: CycleRecord) {
   if (cycle.settled_at) {
     return `结算于 ${dayjs(cycle.settled_at).format('MM/DD HH:mm')}`
   }
-  return '未调整则沿用默认周计划时间'
+  return ''
 }
 
 function canEditCycle(cycle: CycleRecord) {
-  return resolveCyclePhase(cycle) === 'planned'
+  const phase = resolveCyclePhase(cycle)
+  return phase === 'planned' || phase === 'open' || phase === 'closed'
 }
 
 function canDeleteCycle(cycle: CycleRecord) {
@@ -235,7 +236,7 @@ onMounted(() => {
       <StatCard title="风险成员" :value="cycleSummary.bottomTwoNames" detail="如果本期已公示，这里会显示倒数两名。" />
     </section>
 
-    <TableSection title="周期控制中心" description="结算、公示、归档都只保留成眼前这一步，管理员不用再切换多块面板。">
+    <TableSection title="周期控制中心" description="结算、公示、归档都集中在这里处理。">
       <CycleControlPanel
         :control="adminCycleControl"
         :busy="actionBusy"
@@ -246,7 +247,7 @@ onMounted(() => {
       />
     </TableSection>
 
-    <TableSection title="周期列表" description="系统会预生成未来 20 周计划；如果你没有改时间，就按默认周节奏自动推进。">
+    <TableSection title="周期列表" description="可查看并调整当前与后续周期的时间。">
       <div class="cycle-board">
         <div class="overview-grid">
           <article class="surface-card overview-card">
@@ -278,7 +279,7 @@ onMounted(() => {
                 <StatusBadge :tone="statusTone(cycle)">{{ statusLabel(cycle) }}</StatusBadge>
               </div>
               <p class="cycle-item__dates">{{ formatCycleDate(cycle.start_at) }} - {{ formatCycleDate(cycle.end_at) }}</p>
-              <p class="cycle-item__meta">{{ cycleMetaText(cycle) }}</p>
+              <p v-if="cycleMetaText(cycle)" class="cycle-item__meta">{{ cycleMetaText(cycle) }}</p>
             </div>
 
             <div class="cycle-item__actions">
@@ -413,7 +414,7 @@ onMounted(() => {
       </table>
     </TableSection>
 
-    <TableSection title="账户安全" description="正式环境默认密码建议尽快改掉，后续也可以随时在这里更新。">
+    <TableSection title="账户安全" description="可在这里修改当前管理员密码。">
       <PasswordChangePanel />
     </TableSection>
   </div>

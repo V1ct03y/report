@@ -83,10 +83,10 @@ onMounted(() => {
 <template>
   <div class="page-grid">
     <section class="stats-grid">
-      <StatCard title="当前周期" :value="cycleSummary.currentLabel" detail="公示视图始终绑定当前展示周期。" />
-      <StatCard title="周期时间" :value="cycleSummary.currentPeriodText" detail="展示开始与结束时间，便于核对当前周次。" />
-      <StatCard title="下个周期" :value="nextCycleText" detail="展示下一评分周期，替代倒计时卡片。" />
-      <StatCard title="公开状态" :value="publicationState" detail="已公示周期展示真实结果，未公示周期只保留结构。" />
+      <StatCard title="当前周期" :value="cycleSummary.currentLabel" />
+      <StatCard title="周期时间" :value="cycleSummary.currentPeriodText" />
+      <StatCard title="下个周期" :value="nextCycleText" />
+      <StatCard title="公开状态" :value="publicationState" />
     </section>
 
     <section class="surface-card hero-panel">
@@ -95,9 +95,6 @@ onMounted(() => {
           {{ cycleSummary.currentLabel }} {{ cycleSummary.isPublicVisible ? '结果已公开' : '结果待公开' }}
         </StatusBadge>
         <h3>当前公示周期</h3>
-        <p>
-          当前页面始终跟随当前展示阶段；若本期仍处于评分或待公示阶段，则只保留完整骨架并遮罩数据。
-        </p>
       </div>
       <div class="hero-panel__aside">
         <div class="hero-panel__metric">
@@ -113,17 +110,13 @@ onMounted(() => {
 
     <TableSection
       title="匿名评分矩阵"
-      :description="cycleSummary.isPublicVisible
-        ? '已公示后展示匿名评分矩阵；未完成评分权的成员整行显示 false。'
-        : isPrivileged
-          ? '管理员/组长视角：结果实时渲染，组员端将以雾化玻璃遮蔽。'
-          : '未公示前保留完整矩阵骨架，并用 macOS 风格雾化玻璃遮蔽全部内容。'"
+      :description="cycleSummary.isPublicVisible ? '未完成评分权的成员整行显示 false。' : ''"
     >
       <MaskedSurface
         :masked="shouldMask"
         class="results-surface results-surface--matrix"
         title="评分矩阵暂未公开"
-        description="当前仅保留原始矩阵骨架，实际分数将在结算完成并公示后揭示。"
+        description=""
       >
         <AnonymousMatrix
           class="results-matrix"
@@ -135,17 +128,13 @@ onMounted(() => {
 
     <TableSection
       title="最终得分与排名"
-      :description="cycleSummary.isPublicVisible
-        ? '结算完成后展示真实排名与状态。'
-        : isPrivileged
-          ? '管理员/组长视角：排名实时渲染，组员端将以雾化玻璃遮蔽。'
-          : '未公示前保留同尺寸表格占位，并用 macOS 风格雾化玻璃遮蔽最终得分与排名。'"
+      :description="cycleSummary.isPublicVisible ? '结算完成后展示真实排名与状态。' : ''"
     >
       <MaskedSurface
         :masked="shouldMask"
         class="results-surface results-surface--ranking"
         title="最终排名待公示"
-        description="表格维持同样的行列结构，只在正式公示时解除遮罩并显示分数。"
+        description=""
         compact
       >
         <table v-if="rankingRows.length" class="results-table">

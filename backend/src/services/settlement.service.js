@@ -25,6 +25,48 @@ function getCycleParticipants(cycleId) {
   `).all()
 }
 
+function buildCycleResults(cycleId) {
+  const employees = getCycleParticipants(cycleId)
+  const validRaters = new Set(
+    db.prepare('SELECT user_id FROM employee_score_submissions WHERE cycle_id = ? AND used_voting_right = 1').all(cycleId).map((row) => row.user_id)
+  )
+  const leaderIds = listCycleParticipants(cycleId, ['leader']).map((row) => row.id)
+
+  return employees.map((employee) => {
+    const submission = db.prepare('SELECT used_voting_right FROM employee_score_submissions WHERE cycle_id = ? AND user_id = ?').get(cycleId, employee.id)
+    const usedVotingRight = submission?.used_voting_right === 1
+    const selfScoreRow = db.prepare('SELECT score FROM employee_scores WHERE cycle_id = ? AND rater_user_id = ? AND target_user_id = ?').get(cycleId, employee.id, employee.id)
+    const selfScore = usedVotingRight ? (selfScoreRow?.score || 0) : 0
+
+    const peerScores = db.prepare('SELECT score, rater_user_id FROM employee_scores WHERE cycle_id = ? AND target_user_id = ? AND rater_user_id != ?').all(cycleId, employee.id, employee.id)
+      .filter((row) => validRaters.has(row.rater_user_id))
+      .map((row) => row.score)
+    const peerAverage = average(peerScores)
+
+    const leaderScores = leaderIds.map((leaderId) => (
+      db.prepare('SELECT score FROM manager_scores WHERE cycle_id = ? AND manager_user_id = ? AND target_user_id = ?').get(cycleId, leaderId, employee.id)?.score || 0
+    ))
+    const leaderAverage = average(leaderScores)
+    const leaderWeight = leaderIds.length === 0 ? 0 : 0.6
+    const finalScore = Number((leaderAverage * leaderWeight + selfScore * 0.1 + peerAverage * 0.3).toFixed(2))
+
+    return {
+      userId: employee.id,
+      fullName: employee.full_name,
+      selfScore,
+      selfScoreValid: usedVotingRight ? 1 : 0,
+      peerAverage,
+      managerAScore: leaderScores[0] || 0,
+      managerBScore: leaderScores[1] || 0,
+      finalScore,
+      usedVotingRight: usedVotingRight ? 1 : 0
+    }
+  }).sort((a, b) => {
+    if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore
+    return a.userId - b.userId
+  })
+}
+
 export function settleCycle(cycleId, settleMode = 'manual', settledAt = currentSqlTimestamp()) {
   const cycle = getCycleById(cycleId)
   if (!cycle) {
@@ -38,12 +80,6 @@ export function settleCycle(cycleId, settleMode = 'manual', settledAt = currentS
   if (settleMode === 'automatic' && cycle.end_at && cycle.end_at > settledAt) {
     throw new Error('未到自动结算时间')
   }
-
-  const employees = getCycleParticipants(cycleId)
-  const validRaters = new Set(
-    db.prepare('SELECT user_id FROM employee_score_submissions WHERE cycle_id = ? AND used_voting_right = 1').all(cycleId).map((row) => row.user_id)
-  )
-  const leaderIds = listCycleParticipants(cycleId, ['leader']).map((row) => row.id)
 
   const insertResult = db.prepare(`INSERT INTO settlement_results (
     cycle_id, user_id, self_score, self_score_valid, peer_average_score, manager_a_score, manager_b_score, final_score, rank_position, is_bottom_two, used_voting_right
@@ -63,38 +99,7 @@ export function settleCycle(cycleId, settleMode = 'manual', settledAt = currentS
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM settlement_results WHERE cycle_id = ?').run(cycleId)
 
-    const rows = employees.map((employee) => {
-      const submission = db.prepare('SELECT used_voting_right FROM employee_score_submissions WHERE cycle_id = ? AND user_id = ?').get(cycleId, employee.id)
-      const usedVotingRight = submission?.used_voting_right === 1
-      const selfScoreRow = db.prepare('SELECT score FROM employee_scores WHERE cycle_id = ? AND rater_user_id = ? AND target_user_id = ?').get(cycleId, employee.id, employee.id)
-      const selfScore = usedVotingRight ? (selfScoreRow?.score || 0) : 0
-
-      const peerScores = db.prepare('SELECT score, rater_user_id FROM employee_scores WHERE cycle_id = ? AND target_user_id = ? AND rater_user_id != ?').all(cycleId, employee.id, employee.id)
-        .filter((row) => validRaters.has(row.rater_user_id))
-        .map((row) => row.score)
-      const peerAverage = average(peerScores)
-
-      const leaderScores = leaderIds.map((leaderId) => (
-        db.prepare('SELECT score FROM manager_scores WHERE cycle_id = ? AND manager_user_id = ? AND target_user_id = ?').get(cycleId, leaderId, employee.id)?.score || 0
-      ))
-      const leaderAverage = average(leaderScores)
-      const leaderWeight = leaderIds.length === 0 ? 0 : 0.5
-      const finalScore = Number((leaderAverage * leaderWeight + selfScore * 0.1 + peerAverage * 0.4).toFixed(2))
-      const leaderAScore = leaderScores[0] || 0
-      const leaderBScore = leaderScores[1] || 0
-
-      return {
-        userId: employee.id,
-        fullName: employee.full_name,
-        selfScore,
-        selfScoreValid: usedVotingRight ? 1 : 0,
-        peerAverage,
-        managerAScore: leaderAScore,
-        managerBScore: leaderBScore,
-        finalScore,
-        usedVotingRight: usedVotingRight ? 1 : 0
-      }
-    }).sort((a, b) => b.finalScore - a.finalScore)
+    const rows = buildCycleResults(cycleId)
 
     rows.forEach((row, index) => {
       const rankPosition = index + 1
@@ -175,6 +180,26 @@ export function getPublicResults(cycleId) {
       rankPosition: row.rank_position,
       isBottomTwo: !!row.is_bottom_two,
       usedVotingRight: !!row.used_voting_right
+    }))
+  }
+}
+
+export function getPreviewResults(cycleId) {
+  const employees = getCycleParticipants(cycleId)
+  const rows = buildCycleResults(cycleId)
+
+  return {
+    employees,
+    matrix: getPublicMatrix(cycleId),
+    ranking: rows.map((row, index) => ({
+      userId: row.userId,
+      fullName: row.fullName,
+      selfScoreValid: !!row.selfScoreValid,
+      peerAverageScore: row.peerAverage,
+      finalScore: row.finalScore,
+      rankPosition: index + 1,
+      isBottomTwo: index >= Math.max(rows.length - 2, 0),
+      usedVotingRight: !!row.usedVotingRight
     }))
   }
 }

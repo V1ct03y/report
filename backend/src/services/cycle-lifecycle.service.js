@@ -245,20 +245,45 @@ export function reconcileCycleTimeline(now = currentSqlTimestamp()) {
   const tx = db.transaction(() => {
     db.prepare(`
       UPDATE rating_cycles
-      SET status = 'active', updated_at = CURRENT_TIMESTAMP
-      WHERE status = 'draft'
-        AND start_at IS NOT NULL
-        AND start_at <= ?
-        AND (end_at IS NULL OR end_at > ?)
-    `).run(now, now)
-
-    db.prepare(`
-      UPDATE rating_cycles
       SET status = 'closed', updated_at = CURRENT_TIMESTAMP
       WHERE status IN ('draft', 'active')
         AND end_at IS NOT NULL
         AND end_at <= ?
     `).run(now)
+
+    db.prepare(`
+      UPDATE rating_cycles
+      SET status = 'draft', updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'active'
+        AND (
+          start_at IS NULL
+          OR start_at > ?
+          OR (end_at IS NOT NULL AND end_at <= ?)
+        )
+    `).run(now, now)
+
+    const currentCycle = db.prepare(`
+      SELECT id
+      FROM rating_cycles
+      WHERE status IN ('draft', 'active')
+        AND start_at IS NOT NULL
+        AND start_at <= ?
+        AND (end_at IS NULL OR end_at > ?)
+      ORDER BY start_at ASC, week_number ASC, id ASC
+      LIMIT 1
+    `).get(now, now)
+
+    if (currentCycle) {
+      db.prepare(`
+        UPDATE rating_cycles
+        SET status = CASE WHEN id = ? THEN 'active' ELSE 'draft' END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status IN ('draft', 'active')
+          AND start_at IS NOT NULL
+          AND start_at <= ?
+          AND (end_at IS NULL OR end_at > ?)
+      `).run(currentCycle.id, now, now)
+    }
   })
 
   tx()

@@ -3,7 +3,7 @@ withDefaults(
   defineProps<{
     masked?: boolean
     title: string
-    description: string
+    description?: string
     compact?: boolean
   }>(),
   {
@@ -19,7 +19,7 @@ withDefaults(
     <div v-if="masked" class="masked-surface__veil">
       <div class="masked-surface__copy">
         <strong>{{ title }}</strong>
-        <p>{{ description }}</p>
+        <p v-if="description">{{ description }}</p>
       </div>
     </div>
   </div>

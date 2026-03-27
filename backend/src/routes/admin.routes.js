@@ -9,7 +9,7 @@ import {
   getCurrentWorkCyclePure
 } from '../services/cycle-lifecycle.service.js'
 import { saveManagerScores } from '../services/score.service.js'
-import { settleCycle, getPublicResults, settlePendingCycles } from '../services/settlement.service.js'
+import { settleCycle, getPreviewResults, getPublicResults, settlePendingCycles } from '../services/settlement.service.js'
 import {
   listAllCycles,
   createCycle,
@@ -107,7 +107,7 @@ adminRouter.get('/leader/current-cycle', requireRole('leader'), (req, res) => {
     ORDER BY target_user_id ASC
   `).all(cycle.id, req.user.id)
 
-  res.json({ cycle, members, scores })
+  res.json({ cycle, members, scores, ...getPreviewResults(cycle.id), isPublished: Boolean(cycle.published_at) })
 })
 
 adminRouter.post('/manager-scores', requireRole('leader'), (req, res) => {
@@ -168,12 +168,23 @@ adminRouter.post('/cycles/:id/archive', requireRole('admin'), (req, res) => {
   }
 })
 
-adminRouter.get('/results', requireRole('admin'), (_req, res) => {
-  const cycle = getAdminResultsCycle() || getCurrentWorkCyclePure()
+adminRouter.get('/results', requireRole('admin', 'leader'), (req, res) => {
+  const cycle = req.user.role === 'leader'
+    ? getCurrentWorkCyclePure()
+    : (getAdminResultsCycle() || getCurrentWorkCyclePure())
   if (!cycle) return res.status(404).json({ message: '鏆傛棤璇勫垎鍛ㄦ湡' })
+
+  if (req.user.role === 'leader' && !isCycleParticipant(cycle.id, req.user.id)) {
+    return res.status(403).json({ message: '褰撳墠璐﹀彿鏈弬涓庢湰鏈熻瘎鍒?' })
+  }
+
+  const resultPayload = cycle.status === 'settled' || cycle.published_at
+    ? getPublicResults(cycle.id)
+    : getPreviewResults(cycle.id)
+
   res.json({
     cycle,
-    ...getPublicResults(cycle.id),
+    ...resultPayload,
     isPublished: Boolean(cycle.published_at)
   })
 })

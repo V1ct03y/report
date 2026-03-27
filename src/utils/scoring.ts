@@ -43,7 +43,7 @@ export function computeResults(
         : 0
 
     const finalScore = round(
-      leaderA * 0.25 + leaderB * 0.25 + selfScore * 0.1 + peerAverage * 0.4
+      leaderA * 0.3 + leaderB * 0.3 + selfScore * 0.1 + peerAverage * 0.3
     )
 
     return {

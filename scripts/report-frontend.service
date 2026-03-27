@@ -1,0 +1,15 @@
+[Unit]
+Description=Anonymous Rating Settlement Frontend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/.openclaw/workspace
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run preview -- --host 127.0.0.1 --port 4173
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

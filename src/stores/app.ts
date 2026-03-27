@@ -374,6 +374,7 @@ export const useAppStore = defineStore('app', () => {
     const payload = await api.getLeaderCurrentCycle()
     cycle.value = normalizeCycle(payload?.cycle)
     employeeList.value = mapPeople(payload?.members || [])
+    applyPublicResults(payload)
 
     if (currentLeader.value) {
       leaderScores.value[currentLeader.value.id] = {}
@@ -399,9 +400,7 @@ export const useAppStore = defineStore('app', () => {
   async function loadPublicResults() {
     try {
       if (currentAccount.value?.role === 'admin' || currentAccount.value?.role === 'leader') {
-        const payload = currentAccount.value.role === 'admin'
-          ? await api.getAdminResults()
-          : await api.getCurrentPublicCycle()
+        const payload = await api.getAdminResults()
         applyPublicResults(payload)
         return
       }
@@ -527,6 +526,7 @@ export const useAppStore = defineStore('app', () => {
       score
     }))
     await api.submitManagerScores(scores)
+    await loadLeaderCycle().catch(() => undefined)
   }
 
   async function settleCycle(cycleId?: number) {
