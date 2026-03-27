@@ -46,6 +46,7 @@ Notes:
 ```powershell
 Copy-Item backend/.env.example backend/.env
 npm --prefix backend run db:init
+npm --prefix backend run db:reset:acceptance
 npm --prefix backend run dev
 ```
 
@@ -54,6 +55,8 @@ Notes:
 - Backend defaults to `http://localhost:4300`.
 - `backend/src/index.js` runs both the API server and the scheduler when started directly.
 - Database path defaults to `backend/data/app.db`.
+- `npm --prefix backend run db:init` is the formal production initializer: schema + default admin + 20 planned cycles.
+- `npm --prefix backend run db:reset:acceptance` is destructive and only for local demo / acceptance data.
 
 ### Playwright
 
@@ -111,8 +114,9 @@ Use when a feature crosses UI, API, and data layers.
 Use when local data is stale or incompatible.
 
 1. Ensure `backend/.env` exists.
-2. Re-run `npm --prefix backend run db:init`.
-3. Re-test with the seeded accounts above.
+2. For formal local data, run `npm --prefix backend run db:init`.
+3. For demo / acceptance data, run `npm --prefix backend run db:reset:acceptance`.
+4. Re-test with the seeded accounts above.
 
 ## Validation Expectations
 

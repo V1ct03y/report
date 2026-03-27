@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import dayjs from 'dayjs'
 
+import PasswordChangePanel from '../components/account/PasswordChangePanel.vue'
 import CycleControlPanel from '../components/admin/CycleControlPanel.vue'
 import StatCard from '../components/common/StatCard.vue'
 import StatusBadge from '../components/common/StatusBadge.vue'
@@ -34,6 +35,9 @@ const riskyEmployees = computed(() => (
 ))
 
 const hasWorkCycle = computed(() => Boolean(cycleOverview.value.workCycle))
+const editingCycle = computed(() => (
+  allCycles.value.find((cycle) => cycle.id === editingCycleId.value) ?? null
+))
 
 function formatCycleDate(raw: string | null) {
   if (!raw) return '未设置'
@@ -122,6 +126,18 @@ function cancelEditCycle() {
 
 async function saveCycle() {
   if (!editingCycleId.value) return
+  const candidateStart = editForm.start_at || editingCycle.value?.start_at || ''
+  const candidateEnd = editForm.end_at || editingCycle.value?.end_at || ''
+  const now = dayjs()
+  const movesIntoPast = [candidateStart, candidateEnd].some((value) => value && dayjs(value).isBefore(now))
+
+  if (movesIntoPast) {
+    const confirmed = window.confirm(
+      '这个周期时间早于当前时间。保存后系统会立即按当前时间推进状态，可能直接变成进行中、待结算或待公示。确定继续吗？'
+    )
+    if (!confirmed) return
+  }
+
   await appStore.updateExistingCycle(editingCycleId.value, {
     start_at: editForm.start_at || undefined,
     end_at: editForm.end_at || undefined
@@ -395,6 +411,10 @@ onMounted(() => {
           </tr>
         </tbody>
       </table>
+    </TableSection>
+
+    <TableSection title="账户安全" description="正式环境默认密码建议尽快改掉，后续也可以随时在这里更新。">
+      <PasswordChangePanel />
     </TableSection>
   </div>
 </template>

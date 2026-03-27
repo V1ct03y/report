@@ -177,6 +177,31 @@ export function seedWeeklyCycles(now = new Date()) {
   ensurePlannedCycleWindow(20)
 }
 
+export function seedProductionCycles(now = new Date()) {
+  const count = db.prepare('SELECT COUNT(*) as count FROM rating_cycles').get().count
+  if (count > 0) return
+
+  const currentStart = getWeekAnchor(now)
+  const currentEnd = new Date(currentStart.getTime() + CYCLE_DURATION_MS)
+  const currentStatus = now.getTime() >= currentEnd.getTime() ? 'closed' : 'active'
+
+  insertPlannedCycle(
+    makeWeekName(1),
+    1,
+    formatSqlTime(currentStart),
+    formatSqlTime(currentEnd),
+    currentStatus,
+    null,
+    null,
+    0,
+    null,
+    null,
+    'automatic'
+  )
+
+  ensurePlannedCycleWindow(20)
+}
+
 export function ensurePlannedCycleWindow(targetDraftCount = 20) {
   const cycles = listCycles()
   if (!cycles.length) return []

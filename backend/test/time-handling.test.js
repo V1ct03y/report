@@ -12,7 +12,8 @@ if (fs.existsSync(dbFile)) {
 }
 
 const { db } = await import('../src/db/client.js')
-await import('../src/db/init.js')
+const { initializeDatabase } = await import('../src/db/bootstrap.js')
+initializeDatabase({ mode: 'acceptance' })
 const { currentSqlTimestamp, seedWeeklyCycles } = await import('../src/services/cycle-lifecycle.service.js')
 const { getSchedulingConfig, getNextScheduledEvents, updateSchedulingConfig } = await import('../src/services/scheduling.service.js')
 const { createCycle } = await import('../src/services/cycle-admin.service.js')
