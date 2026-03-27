@@ -37,6 +37,15 @@ withDefaults(
   border-radius: 20px;
 }
 
+.masked-surface:has(.masked-surface__veil) {
+  min-height: 11rem;
+  user-select: none;
+}
+
+.masked-surface--compact:has(.masked-surface__veil) {
+  min-height: 9.5rem;
+}
+
 .masked-surface__veil {
   position: absolute;
   inset: 0;
@@ -45,7 +54,7 @@ withDefaults(
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 1.5rem;
+  padding: clamp(1rem, 2vw, 1.5rem);
   border-radius: inherit;
   overflow: hidden;
   background:
@@ -73,6 +82,7 @@ withDefaults(
 .masked-surface__copy {
   position: relative;
   z-index: 1;
+  width: min(100%, 28rem);
   max-width: 28rem;
   padding: 1.25rem 1.45rem;
   border-radius: 24px;
@@ -92,10 +102,6 @@ withDefaults(
   margin: 0.55rem 0 0;
   color: var(--text-soft);
   line-height: 1.65;
-}
-
-.masked-surface:has(.masked-surface__veil) {
-  user-select: none;
 }
 
 .masked-surface:has(.masked-surface__veil) :deep(table),

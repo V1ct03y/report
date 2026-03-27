@@ -1,6 +1,9 @@
 import { db } from './client.js'
 import { hashPassword } from '../utils/crypto.js'
-import { safeEnsureCycleColumns, seedWeeklyCycles } from '../services/cycle-lifecycle.service.js'
+import { currentSqlTimestamp, safeEnsureCycleColumns, seedWeeklyCycles } from '../services/cycle-lifecycle.service.js'
+import { saveEmployeeScores, saveManagerScores } from '../services/score.service.js'
+import { settleCycle } from '../services/settlement.service.js'
+import { archiveCycle, publishCycle } from '../services/cycle-control.service.js'
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -110,6 +113,120 @@ CREATE TABLE IF NOT EXISTS cycle_participants (
 );
 `
 
+const DEMO_EMPLOYEE_SCORE_BOOK = {
+  1: {
+    zhangsan: { zhangsan: 98, lisi: 94, wangwu: 92, zhaoliu: 90 },
+    lisi: { zhangsan: 95, lisi: 97, wangwu: 91, zhaoliu: 88 },
+    wangwu: { zhangsan: 93, lisi: 90, wangwu: 96, zhaoliu: 87 },
+    zhaoliu: { zhangsan: 91, lisi: 89, wangwu: 88, zhaoliu: 95 }
+  },
+  2: {
+    zhangsan: { zhangsan: 96, lisi: 92, wangwu: 89, zhaoliu: 86 },
+    lisi: { zhangsan: 93, lisi: 95, wangwu: 90, zhaoliu: 87 },
+    wangwu: { zhangsan: 90, lisi: 88, wangwu: 94, zhaoliu: 85 },
+    zhaoliu: { zhangsan: 88, lisi: 86, wangwu: 84, zhaoliu: 92 }
+  }
+}
+
+const DEMO_MANAGER_SCORE_BOOK = {
+  1: {
+    'leader-a': { zhangsan: 96, lisi: 93, wangwu: 90, zhaoliu: 87 },
+    'leader-b': { zhangsan: 95, lisi: 92, wangwu: 89, zhaoliu: 86 }
+  },
+  2: {
+    'leader-a': { zhangsan: 94, lisi: 91, wangwu: 88, zhaoliu: 85 },
+    'leader-b': { zhangsan: 93, lisi: 90, wangwu: 87, zhaoliu: 84 }
+  }
+}
+
+function addMinutesToSqlTime(raw, minutes) {
+  const date = new Date(String(raw).replace(' ', 'T'))
+  return currentSqlTimestamp(new Date(date.getTime() + minutes * 60 * 1000))
+}
+
+function seedAcceptanceHistoryData() {
+  const historyCycles = db.prepare(`
+    SELECT id, week_number, end_at
+    FROM rating_cycles
+    WHERE week_number IN (1, 2)
+    ORDER BY week_number ASC
+  `).all()
+
+  if (historyCycles.length !== 2) return
+
+  const existingResults = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM settlement_results
+    WHERE cycle_id IN (?, ?)
+  `).get(historyCycles[0].id, historyCycles[1].id).count
+
+  if (existingResults > 0) return
+
+  const users = db.prepare(`
+    SELECT id, username
+    FROM users
+    WHERE username IN ('leader-a', 'leader-b', 'zhangsan', 'lisi', 'wangwu', 'zhaoliu')
+    ORDER BY id ASC
+  `).all()
+  const userByUsername = new Map(users.map((user) => [user.username, user]))
+
+  const resetCycleData = db.transaction((cycleId) => {
+    db.prepare('DELETE FROM settlement_results WHERE cycle_id = ?').run(cycleId)
+    db.prepare('DELETE FROM employee_scores WHERE cycle_id = ?').run(cycleId)
+    db.prepare('DELETE FROM employee_score_submissions WHERE cycle_id = ?').run(cycleId)
+    db.prepare('DELETE FROM manager_scores WHERE cycle_id = ?').run(cycleId)
+    db.prepare('DELETE FROM cycle_participants WHERE cycle_id = ?').run(cycleId)
+    db.prepare(`
+      UPDATE rating_cycles
+      SET status = 'closed',
+          settled_at = NULL,
+          public_at = NULL,
+          published_at = NULL,
+          archived_at = NULL,
+          is_archived = 0,
+          settle_mode = 'automatic',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(cycleId)
+  })
+
+  for (const cycle of historyCycles) {
+    resetCycleData(cycle.id)
+
+    const employeeBook = DEMO_EMPLOYEE_SCORE_BOOK[cycle.week_number] || {}
+    for (const [raterUsername, scoreMap] of Object.entries(employeeBook)) {
+      const rater = userByUsername.get(raterUsername)
+      if (!rater) continue
+      saveEmployeeScores(
+        cycle.id,
+        rater.id,
+        Object.entries(scoreMap).map(([targetUsername, score]) => ({
+          targetUserId: userByUsername.get(targetUsername)?.id,
+          score
+        })).filter((item) => Number.isFinite(item.targetUserId))
+      )
+    }
+
+    const managerBook = DEMO_MANAGER_SCORE_BOOK[cycle.week_number] || {}
+    for (const [leaderUsername, scoreMap] of Object.entries(managerBook)) {
+      const leader = userByUsername.get(leaderUsername)
+      if (!leader) continue
+      saveManagerScores(
+        cycle.id,
+        leader.id,
+        Object.entries(scoreMap).map(([targetUsername, score]) => ({
+          targetUserId: userByUsername.get(targetUsername)?.id,
+          score
+        })).filter((item) => Number.isFinite(item.targetUserId))
+      )
+    }
+
+    settleCycle(cycle.id, 'automatic', cycle.end_at)
+    publishCycle(cycle.id, cycle.end_at)
+    archiveCycle(cycle.id, addMinutesToSqlTime(cycle.end_at, 30))
+  }
+}
+
 function ensureUserRoleModel() {
   const userTable = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get()
   if (!userTable?.sql) return
@@ -165,6 +282,8 @@ db.exec(schema)
 ensureUserRoleModel()
 safeEnsureCycleColumns()
 
+const cycleCount = db.prepare('SELECT COUNT(*) as count FROM rating_cycles').get().count
+
 const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count
 if (userCount === 0) {
   const insertUser = db.prepare('INSERT INTO users (username, full_name, password_hash, role, force_password_change) VALUES (?, ?, ?, ?, ?)')
@@ -180,5 +299,8 @@ if (userCount === 0) {
 }
 
 seedWeeklyCycles()
+if (cycleCount <= 1) {
+  seedAcceptanceHistoryData()
+}
 
 console.log('Database initialized.')

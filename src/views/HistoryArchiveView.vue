@@ -44,8 +44,12 @@ onMounted(loadHistory)
 </script>
 
 <template>
-  <div class="page-grid archive-layout">
-    <TableSection title="历史归档" description="已从当前公示区归档的周期都会保留在这里，支持随时复查。">
+  <div class="archive-layout">
+    <TableSection
+      class="archive-sidebar"
+      title="历史归档"
+      description="已从当前公示区归档的周期都会保留在这里，支持随时复查。"
+    >
       <div class="archive-list">
         <button
           v-for="cycle in cycles"
@@ -61,7 +65,11 @@ onMounted(loadHistory)
       </div>
     </TableSection>
 
-    <TableSection :title="activeCycle?.week_number ? `第${activeCycle.week_number}周历史公示` : '历史公示'" description="查看指定归档周期的匿名矩阵、最终排名与结算方式。">
+    <TableSection
+      class="archive-detail"
+      :title="activeCycle?.week_number ? `第${activeCycle.week_number}周历史公示` : '历史公示'"
+      description="查看指定归档周期的匿名矩阵、最终排名与结算方式。"
+    >
       <div v-if="activeCycle" class="page-grid">
         <section class="archive-summary">
           <div>
@@ -108,13 +116,28 @@ onMounted(loadHistory)
 
 <style scoped>
 .archive-layout {
-  grid-template-columns: 320px 1fr;
+  display: grid;
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  gap: 1.1rem;
   align-items: start;
+}
+
+.archive-sidebar {
+  position: sticky;
+  top: 0;
+}
+
+.archive-detail {
+  min-width: 0;
 }
 
 .archive-list {
   display: grid;
   gap: 0.75rem;
+  max-height: min(60vh, 34rem);
+  overflow-y: auto;
+  padding-right: 0.2rem;
+  align-content: start;
 }
 
 .archive-list__item {
@@ -185,6 +208,15 @@ onMounted(loadHistory)
 @media (max-width: 1023px) {
   .archive-layout {
     grid-template-columns: 1fr;
+  }
+
+  .archive-sidebar {
+    position: static;
+  }
+
+  .archive-list {
+    max-height: none;
+    overflow: visible;
   }
 
   .archive-summary {

@@ -44,6 +44,7 @@ const navItems = computed(() => {
 })
 
 const showShell = computed(() => route.meta.shell !== false)
+const authlessWide = computed(() => route.meta.authlessWide === true)
 
 const countdownText = computed(() => {
   if (!cycleSummary.value.deadlineAt) return '未设置'
@@ -172,7 +173,7 @@ function navigateTo(path: string) {
       </main>
     </template>
 
-    <main v-else class="authless-panel">
+    <main v-else class="authless-panel" :class="{ 'authless-panel--wide': authlessWide }">
       <RouterView />
     </main>
   </div>

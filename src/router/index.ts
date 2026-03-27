@@ -19,7 +19,7 @@ const router = createRouter({
       path: '/reset-password',
       name: 'reset-password',
       component: () => import('../views/FirstPasswordResetView.vue'),
-      meta: { title: '首次修改密码', requiresAuth: true }
+      meta: { shell: false, authlessWide: true, title: '首次修改密码', requiresAuth: true }
     },
     {
       path: '/employee/rating',

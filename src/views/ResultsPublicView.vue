@@ -15,10 +15,41 @@ const { cycleSummary, publicEmployees, publicMatrixRows, results, cycleOverview,
 const isPrivileged = computed(() => currentAccount.value?.role === 'admin' || currentAccount.value?.role === 'leader')
 const shouldMask = computed(() => !cycleSummary.value.isPublicVisible && !isPrivileged.value)
 
+const maskedPlaceholderCount = computed(() => {
+  if (!shouldMask.value) return 0
+  return Math.max(publicEmployees.value.length, cycleSummary.value.employeeCount || 0, 4)
+})
+
+const maskedPlaceholderEmployees = computed(() => (
+  Array.from({ length: maskedPlaceholderCount.value }, (_, index) => ({
+    id: `masked-${index + 1}`,
+    name: `待公示成员 ${index + 1}`,
+    department: '待公示'
+  }))
+))
+
+const matrixColumns = computed(() => {
+  if (publicEmployees.value.length) return publicEmployees.value.map((item) => item.name)
+  return maskedPlaceholderEmployees.value.map((item) => item.name)
+})
+
+const matrixRows = computed(() => {
+  if (publicMatrixRows.value.length) return publicMatrixRows.value
+  if (!shouldMask.value) return []
+
+  return maskedPlaceholderEmployees.value.map((employee, index) => ({
+    rowLabel: `匿名-${String(index + 1).padStart(2, '0')}`,
+    employeeId: employee.id,
+    values: maskedPlaceholderEmployees.value.map(() => null),
+    valid: false
+  }))
+})
+
 const rankingRows = computed(() => {
   if (results.value.length) return results.value
   if (!shouldMask.value) return []
-  return publicEmployees.value.map((employee, index) => ({
+
+  return maskedPlaceholderEmployees.value.map((employee, index) => ({
     employeeId: employee.id,
     name: employee.name,
     department: employee.department,
@@ -65,7 +96,7 @@ onMounted(() => {
         </StatusBadge>
         <h3>当前公示周期</h3>
         <p>
-          当前页面始终跟随当前展示阶段；若本期仍处于 work 或待公示阶段，则只保留完整骨架并遮罩数据。
+          当前页面始终跟随当前展示阶段；若本期仍处于评分或待公示阶段，则只保留完整骨架并遮罩数据。
         </p>
       </div>
       <div class="hero-panel__aside">
@@ -90,10 +121,15 @@ onMounted(() => {
     >
       <MaskedSurface
         :masked="shouldMask"
+        class="results-surface results-surface--matrix"
         title="评分矩阵暂未公开"
         description="当前仅保留原始矩阵骨架，实际分数将在结算完成并公示后揭示。"
       >
-        <AnonymousMatrix :columns="publicEmployees.map((item) => item.name)" :rows="publicMatrixRows" />
+        <AnonymousMatrix
+          class="results-matrix"
+          :columns="matrixColumns"
+          :rows="matrixRows"
+        />
       </MaskedSurface>
     </TableSection>
 
@@ -107,6 +143,7 @@ onMounted(() => {
     >
       <MaskedSurface
         :masked="shouldMask"
+        class="results-surface results-surface--ranking"
         title="最终排名待公示"
         description="表格维持同样的行列结构，只在正式公示时解除遮罩并显示分数。"
         compact
@@ -148,6 +185,18 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.results-surface--matrix {
+  min-height: clamp(14rem, 30vw, 20rem);
+}
+
+.results-surface--ranking {
+  min-height: clamp(12rem, 26vw, 16rem);
+}
+
+.results-matrix {
+  min-width: 100%;
+}
+
 .results-empty {
   padding: 1rem 0.75rem;
   color: var(--text-soft);

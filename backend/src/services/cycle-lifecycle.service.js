@@ -4,7 +4,7 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 const CYCLE_DURATION_MS = 2 * 24 * 60 * 60 * 1000
 
 function makeWeekName(weekNumber) {
-  return `第${weekNumber}周工作评分`
+  return `\u7b2c${weekNumber}\u5468\u5de5\u4f5c\u8bc4\u5206`
 }
 
 function parseSqlTime(raw) {
@@ -24,10 +24,6 @@ function getArchivedAt(cycle) {
   if (!cycle) return null
   if (cycle.archived_at) return cycle.archived_at
   return Number(cycle.is_archived) === 1 ? (cycle.updated_at ?? null) : null
-}
-
-function isArchivedCycle(cycle) {
-  return Boolean(getArchivedAt(cycle) || Number(cycle?.is_archived) === 1)
 }
 
 function withPublicationState(cycle) {
@@ -108,19 +104,62 @@ export function safeEnsureCycleColumns() {
   `)
 }
 
-export function seedWeeklyCycles() {
+export function seedWeeklyCycles(now = new Date()) {
   const count = db.prepare('SELECT COUNT(*) as count FROM rating_cycles').get().count
   if (count > 1) return
 
   db.prepare('DELETE FROM rating_cycles').run()
-  const insert = db.prepare(`INSERT INTO rating_cycles (name, week_number, start_at, end_at, status, public_at, is_archived)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`)
 
-  insert.run(makeWeekName(1), 1, '2026-03-05 21:10:00', '2026-03-07 21:10:00', 'settled', '2026-03-07 21:10:00', 1)
-  insert.run(makeWeekName(2), 2, '2026-03-12 21:10:00', '2026-03-14 21:10:00', 'settled', '2026-03-14 21:10:00', 1)
-  insert.run(makeWeekName(3), 3, '2026-03-19 21:10:00', '2026-03-21 21:10:00', 'settled', '2026-03-21 21:10:00', 0)
-  insert.run(makeWeekName(4), 4, '2026-03-26 21:10:00', '2026-03-28 21:10:00', 'draft', null, 0)
-  insert.run(makeWeekName(5), 5, '2026-04-02 21:10:00', '2026-04-04 21:10:00', 'draft', null, 0)
+  const currentStart = getWeekAnchor(now)
+  const currentEnd = new Date(currentStart.getTime() + CYCLE_DURATION_MS)
+  const currentStatus = now.getTime() >= currentEnd.getTime() ? 'closed' : 'active'
+  const insert = db.prepare(`
+    INSERT INTO rating_cycles (
+      name,
+      week_number,
+      start_at,
+      end_at,
+      status,
+      settled_at,
+      public_at,
+      is_archived,
+      published_at,
+      archived_at,
+      settle_mode
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const weeks = [
+    { weekNumber: 1, start: new Date(currentStart.getTime() - WEEK_MS * 2), status: 'settled', published: true, archived: true, settleMode: 'automatic' },
+    { weekNumber: 2, start: new Date(currentStart.getTime() - WEEK_MS), status: 'settled', published: true, archived: true, settleMode: 'automatic' },
+    { weekNumber: 3, start: new Date(currentStart.getTime()), status: currentStatus, published: false, archived: false, settleMode: 'automatic' },
+    { weekNumber: 4, start: new Date(currentStart.getTime() + WEEK_MS), status: 'draft', published: false, archived: false, settleMode: 'automatic' }
+  ]
+
+  for (const week of weeks) {
+    const startAt = formatSqlTime(week.start)
+    const endAt = formatSqlTime(new Date(week.start.getTime() + CYCLE_DURATION_MS))
+    const settledAt = week.status === 'settled' ? endAt : null
+    const publishedAt = week.published ? endAt : null
+    const archivedAt = week.archived
+      ? formatSqlTime(new Date(week.start.getTime() + CYCLE_DURATION_MS + 60 * 60 * 1000))
+      : null
+
+    insert.run(
+      makeWeekName(week.weekNumber),
+      week.weekNumber,
+      startAt,
+      endAt,
+      week.status,
+      settledAt,
+      publishedAt,
+      week.archived ? 1 : 0,
+      publishedAt,
+      archivedAt,
+      week.settleMode
+    )
+  }
 }
 
 export function ensureUpcomingCycle(now = currentSqlTimestamp()) {

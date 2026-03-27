@@ -164,6 +164,10 @@ input {
   max-width: 480px;
 }
 
+.authless-panel--wide > :deep(*) {
+  max-width: 52rem;
+}
+
 .main-panel {
   height: 100vh;
   overflow: hidden;
