@@ -6,6 +6,18 @@ import { getCurrentPublicCycle, getCurrentWorkCycle, getCycleOverview } from '..
 import { saveManagerScores } from '../services/score.service.js'
 import { settleCycle, getPublicResults, settlePendingCycles } from '../services/settlement.service.js'
 import {
+  listAllCycles,
+  createCycle,
+  updateCycle,
+  deleteCycle
+} from '../services/cycle-admin.service.js'
+import {
+  getSchedulingConfig,
+  updateSchedulingConfig,
+  getNextScheduledEvents,
+  formatScheduleDesc
+} from '../services/scheduling.service.js'
+import {
   createMember,
   deactivateSelfIfAllowed,
   listUsersForDashboard,
@@ -167,6 +179,67 @@ adminRouter.post('/self/deactivate', requireRole('admin'), (req, res) => {
   try {
     const user = deactivateSelfIfAllowed(req.user.id)
     res.json({ user })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+// ─── Scheduling config ───────────────────────────────────────────────────────
+
+adminRouter.get('/scheduling', requireRole('admin'), (_req, res) => {
+  const config = getSchedulingConfig()
+  const nextEvents = getNextScheduledEvents()
+  res.json({
+    ...config,
+    description: formatScheduleDesc(config),
+    nextOpenAt: nextEvents.openDate,
+    nextCloseAt: nextEvents.closeDate
+  })
+})
+
+adminRouter.patch('/scheduling', requireRole('admin'), (req, res) => {
+  try {
+    const config = updateSchedulingConfig(req.body)
+    const nextEvents = getNextScheduledEvents()
+    res.json({
+      ...config,
+      description: formatScheduleDesc(config),
+      nextOpenAt: nextEvents.openDate,
+      nextCloseAt: nextEvents.closeDate
+    })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+// ─── Cycle CRUD ───────────────────────────────────────────────────────────────
+
+adminRouter.get('/cycles', requireRole('admin'), (_req, res) => {
+  res.json({ cycles: listAllCycles() })
+})
+
+adminRouter.post('/cycles', requireRole('admin'), (req, res) => {
+  try {
+    const cycle = createCycle(req.body)
+    res.status(201).json({ cycle })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+adminRouter.patch('/cycles/:id', requireRole('admin'), (req, res) => {
+  try {
+    const cycle = updateCycle(Number(req.params.id), req.body)
+    res.json({ cycle })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
+})
+
+adminRouter.delete('/cycles/:id', requireRole('admin'), (req, res) => {
+  try {
+    const result = deleteCycle(Number(req.params.id))
+    res.json(result)
   } catch (error) {
     res.status(400).json({ message: error.message })
   }

@@ -9,30 +9,41 @@ function makeWeekName(weekNumber) {
 
 function parseSqlTime(raw) {
   if (!raw) return null
-  return new Date(raw.replace(' ', 'T') + 'Z')
+  return new Date(raw.replace(' ', 'T'))
 }
 
 function formatSqlTime(date) {
   return currentSqlTimestamp(date)
 }
 
+export function normalizeLocalDateTimeInput(raw) {
+  if (raw == null) return null
+  const value = String(raw).trim()
+  if (!value) return null
+  const normalized = value.replace('T', ' ')
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized)) {
+    return `${normalized}:00`
+  }
+  return normalized.slice(0, 19)
+}
+
 function getWeekAnchor(now = new Date()) {
-  const utc = new Date(now)
-  const day = utc.getUTCDay()
+  const local = new Date(now)
+  const day = local.getDay()
   const daysSinceWednesday = (day + 4) % 7
-  const anchor = new Date(Date.UTC(
-    utc.getUTCFullYear(),
-    utc.getUTCMonth(),
-    utc.getUTCDate(),
+  const anchor = new Date(
+    local.getFullYear(),
+    local.getMonth(),
+    local.getDate(),
     21,
     10,
     0,
     0
-  ))
-  anchor.setUTCDate(anchor.getUTCDate() - daysSinceWednesday)
+  )
+  anchor.setDate(anchor.getDate() - daysSinceWednesday)
 
-  if (utc.getTime() < anchor.getTime()) {
-    anchor.setUTCDate(anchor.getUTCDate() - 7)
+  if (local.getTime() < anchor.getTime()) {
+    anchor.setDate(anchor.getDate() - 7)
   }
 
   return anchor
@@ -40,15 +51,15 @@ function getWeekAnchor(now = new Date()) {
 
 export function currentSqlTimestamp(now = new Date()) {
   if (typeof now === 'string') {
-    return now.replace('T', ' ').slice(0, 19)
+    return normalizeLocalDateTimeInput(now)
   }
 
-  const year = now.getUTCFullYear()
-  const month = String(now.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(now.getUTCDate()).padStart(2, '0')
-  const hour = String(now.getUTCHours()).padStart(2, '0')
-  const minute = String(now.getUTCMinutes()).padStart(2, '0')
-  const second = String(now.getUTCSeconds()).padStart(2, '0')
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const hour = String(now.getHours()).padStart(2, '0')
+  const minute = String(now.getMinutes()).padStart(2, '0')
+  const second = String(now.getSeconds()).padStart(2, '0')
   return `${year}-${month}-${day} ${hour}:${minute}:${second}`
 }
 

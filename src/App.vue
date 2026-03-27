@@ -12,6 +12,7 @@ const router = useRouter()
 const appStore = useAppStore()
 const { currentAccount, cycleSummary } = storeToRefs(appStore)
 const now = ref(Date.now())
+const drawerOpen = ref(false)
 
 const navItems = computed(() => {
   if (!currentAccount.value) {
@@ -87,12 +88,35 @@ function handleLogout() {
   appStore.logout()
   router.push('/login')
 }
+
+function navigateTo(path: string) {
+  router.push(path)
+  drawerOpen.value = false
+}
 </script>
 
 <template>
   <div class="app-shell" :class="{ 'app-shell--authless': !showShell }">
     <template v-if="showShell">
-      <aside class="sidebar">
+      <!-- Mobile header with hamburger -->
+      <header class="mobile-header">
+        <button class="hamburger" type="button" @click="drawerOpen = true" aria-label="打开菜单">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <h1 class="mobile-header__title">电控匿名工作评分系统</h1>
+      </header>
+
+      <!-- Drawer overlay -->
+      <div
+        class="drawer-overlay"
+        :class="{ 'drawer-overlay--visible': drawerOpen }"
+        @click="drawerOpen = false"
+      ></div>
+
+      <!-- Sidebar / Drawer -->
+      <aside class="sidebar" :class="{ 'sidebar--open': drawerOpen }">
         <div class="sidebar__brand">
           <p class="sidebar__eyebrow">Work Rating System</p>
           <h1>电控匿名工作评分系统</h1>
@@ -106,7 +130,7 @@ function handleLogout() {
             class="sidebar__link"
             :class="{ 'sidebar__link--active': route.path === item.to }"
             type="button"
-            @click="router.push(item.to)"
+            @click="navigateTo(item.to)"
           >
             {{ item.label }}
           </button>
@@ -127,7 +151,7 @@ function handleLogout() {
 
       <main class="main-panel">
         <header class="topbar">
-          <div>
+          <div class="topbar__left">
             <p class="topbar__eyebrow">当前评分周期</p>
             <h2>{{ route.meta.title }}</h2>
             <p class="topbar__caption">{{ cycleSummary.currentLabel }} · {{ cycleSummary.currentPeriodText }}</p>
@@ -155,9 +179,106 @@ function handleLogout() {
 </template>
 
 <style scoped>
+/* Mobile header - only visible below 1024px */
+.mobile-header {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  background: rgba(255, 248, 237, 0.96);
+  border-bottom: 1px solid rgba(214, 191, 160, 0.45);
+  backdrop-filter: blur(12px);
+}
+
+.mobile-header__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  color: var(--text-strong);
+}
+
+/* Hamburger button */
+.hamburger {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 40px;
+  height: 40px;
+  padding: 8px;
+  border: 1px solid rgba(213, 176, 132, 0.6);
+  border-radius: 12px;
+  background: rgba(255, 250, 243, 0.9);
+  cursor: pointer;
+}
+
+.hamburger span {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: var(--brand-strong);
+  border-radius: 2px;
+  transition: transform 0.2s ease;
+}
+
+/* Drawer overlay */
+.drawer-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+  background: rgba(46, 36, 26, 0.45);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.drawer-overlay--visible {
+  opacity: 1;
+}
+
 .topbar__metric small {
   display: block;
   margin-top: 0.25rem;
   color: var(--text-soft);
+}
+
+.topbar__left {
+  min-width: 0;
+}
+
+/* Sidebar drawer - only on mobile/tablet */
+@media (max-width: 1023px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 200;
+    width: 300px;
+    height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .sidebar--open {
+    transform: translateX(0);
+  }
+
+  .mobile-header {
+    display: flex;
+  }
+
+  .drawer-overlay {
+    display: block;
+  }
+
+  .main-panel {
+    padding-top: 4.5rem;
+  }
 }
 </style>

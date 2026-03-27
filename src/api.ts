@@ -116,5 +116,23 @@ export const api = {
   },
   getCycleResults(id: number) {
     return request(`/cycles/${id}/results`)
+  },
+  getSchedulingConfig() {
+    return request('/admin/scheduling')
+  },
+  updateSchedulingConfig(patch: Record<string, number>) {
+    return request('/admin/scheduling', { method: 'PATCH', body: JSON.stringify(patch) })
+  },
+  getAdminCycles() {
+    return request('/admin/cycles')
+  },
+  createCycle(payload: { name?: string; start_at?: string; end_at?: string }) {
+    return request('/admin/cycles', { method: 'POST', body: JSON.stringify(payload) })
+  },
+  updateCycle(id: number, payload: { name?: string; start_at?: string; end_at?: string }) {
+    return request(`/admin/cycles/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+  },
+  deleteCycle(id: number) {
+    return request(`/admin/cycles/${id}`, { method: 'DELETE' })
   }
 }

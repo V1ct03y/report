@@ -30,6 +30,7 @@ withDefaults(
   position: relative;
   border-radius: 24px;
   overflow: hidden;
+  isolation: isolate;
 }
 
 .masked-surface--compact {
@@ -45,23 +46,27 @@ withDefaults(
   justify-content: center;
   text-align: center;
   padding: 1.5rem;
+  border-radius: inherit;
+  overflow: hidden;
   background:
-    linear-gradient(135deg, rgba(255, 251, 245, 0.78), rgba(244, 233, 218, 0.7)),
-    rgba(255, 250, 244, 0.6);
-  backdrop-filter: blur(26px) saturate(1.22);
-  -webkit-backdrop-filter: blur(26px) saturate(1.22);
+    linear-gradient(140deg, rgba(255, 255, 255, 0.2), rgba(248, 236, 220, 0.24)),
+    linear-gradient(180deg, rgba(255, 251, 245, 0.12), rgba(255, 248, 240, 0.18));
+  backdrop-filter: blur(18px) saturate(1.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.72),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.24);
 }
 
 .masked-surface__veil::before {
   content: '';
   position: absolute;
   inset: 0;
+  border-radius: inherit;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.02)),
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.26), transparent 36%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.06) 38%, rgba(255, 255, 255, 0.14)),
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.34), transparent 38%),
+    radial-gradient(circle at bottom right, rgba(244, 222, 192, 0.18), transparent 30%);
   pointer-events: none;
 }
 
@@ -71,9 +76,11 @@ withDefaults(
   max-width: 28rem;
   padding: 1.25rem 1.45rem;
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.44);
-  border: 1px solid rgba(255, 255, 255, 0.58);
-  box-shadow: 0 12px 36px rgba(118, 92, 55, 0.12);
+  background: rgba(255, 253, 250, 0.36);
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  box-shadow:
+    0 12px 36px rgba(118, 92, 55, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42);
 }
 
 .masked-surface__copy strong {
@@ -93,8 +100,8 @@ withDefaults(
 
 .masked-surface:has(.masked-surface__veil) :deep(table),
 .masked-surface:has(.masked-surface__veil) :deep(.matrix) {
-  filter: blur(5px) saturate(0.92);
-  transform: scale(1.01);
+  opacity: 0.52;
+  filter: saturate(0.94);
   pointer-events: none;
 }
 </style>

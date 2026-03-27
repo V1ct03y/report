@@ -122,12 +122,29 @@ th {
 }
 
 .score-table__control input {
-  width: 7rem;
+  width: 100%;
+  max-width: 7rem;
   padding: 0.75rem 0.9rem;
   border: 1px solid rgba(213, 176, 132, 0.8);
   border-radius: 16px;
   background: rgba(255, 253, 249, 0.96);
   color: var(--text-strong);
   font: inherit;
+  box-sizing: border-box;
+}
+
+@media (max-width: 767px) {
+  .score-table__control input {
+    max-width: 5rem;
+    padding: 0.65rem 0.6rem;
+  }
+}
+
+@media (max-width: 479px) {
+  .score-table__control input {
+    max-width: 4rem;
+    padding: 0.55rem 0.4rem;
+    font-size: 0.9rem;
+  }
 }
 </style>

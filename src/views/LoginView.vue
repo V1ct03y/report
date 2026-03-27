@@ -184,6 +184,26 @@ async function handleLogin() {
 @media (max-width: 1080px) {
   .auth-page {
     grid-template-columns: 1fr;
+    align-items: stretch;
+    min-height: calc(100vh - 2rem);
+  }
+
+  .auth-hero {
+    display: none;
+  }
+
+  .auth-card {
+    flex: 1;
+  }
+
+  .auth-card h2 {
+    font-size: 1.6rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .auth-page {
+    padding: 1rem;
   }
 }
 </style>

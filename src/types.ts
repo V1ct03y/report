@@ -104,3 +104,21 @@ export interface PublicMatrixRow {
   values: Array<number | false | null>
   valid?: boolean
 }
+
+export interface SchedulingConfig {
+  id: number
+  enabled: number
+  open_day: number
+  open_hour: number
+  open_minute: number
+  close_day: number
+  close_hour: number
+  close_minute: number
+  auto_settle: number
+  last_auto_open_at: string | null
+  last_auto_close_at: string | null
+  updated_at: string
+  description: string
+  nextOpenAt: string
+  nextCloseAt: string
+}

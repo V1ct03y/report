@@ -182,7 +182,7 @@ onMounted(loadHistory)
   text-align: left;
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1023px) {
   .archive-layout {
     grid-template-columns: 1fr;
   }

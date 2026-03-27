@@ -15,7 +15,8 @@ import type {
   MemberRecord,
   PublicMatrixRow,
   Role,
-  ScoreMap
+  ScoreMap,
+  SchedulingConfig
 } from '../types'
 
 function emptyOverview(): CycleOverview {
@@ -161,6 +162,8 @@ export const useAppStore = defineStore('app', () => {
   const users = ref<MemberRecord[]>([])
   const cycleOverview = ref<CycleOverview>(emptyOverview())
   const historyCycles = ref<CycleRecord[]>([])
+  const schedulingConfig = ref<SchedulingConfig | null>(null)
+  const allCycles = ref<CycleRecord[]>([])
 
   const currentEmployee = computed(() => {
     const employeeId = currentAccount.value?.linkedEmployeeId
@@ -398,7 +401,7 @@ export const useAppStore = defineStore('app', () => {
 
       await loadCycleOverview()
       if (role === 'member') {
-        await loadEmployeeCycle()
+        await loadEmployeeCycle().catch(() => undefined)
       }
       if (role === 'leader') {
         await loadLeaderCycle().catch(() => undefined)
@@ -509,6 +512,40 @@ export const useAppStore = defineStore('app', () => {
     logout()
   }
 
+  async function loadSchedulingConfig() {
+    schedulingConfig.value = await api.getSchedulingConfig()
+  }
+
+  async function saveSchedulingConfig(patch: Record<string, number>) {
+    schedulingConfig.value = await api.updateSchedulingConfig(patch)
+  }
+
+  async function loadAllCycles() {
+    const payload = await api.getAdminCycles()
+    allCycles.value = payload.cycles
+  }
+
+  async function createNewCycle(payload: { name?: string; start_at?: string; end_at?: string }) {
+    await api.createCycle(payload)
+    await loadAllCycles()
+    await loadCycleOverview()
+    await loadDashboard()
+  }
+
+  async function updateExistingCycle(id: number, payload: { name?: string; start_at?: string; end_at?: string }) {
+    await api.updateCycle(id, payload)
+    await loadAllCycles()
+    await loadCycleOverview()
+    await loadDashboard()
+  }
+
+  async function removeCycle(id: number) {
+    await api.deleteCycle(id)
+    await loadAllCycles()
+    await loadCycleOverview()
+    await loadDashboard()
+  }
+
   function quickLogin() {
     return { ok: false as const, reason: '已切换为真实后端登录，不再支持演示快捷登录' }
   }
@@ -534,6 +571,8 @@ export const useAppStore = defineStore('app', () => {
     users,
     cycleOverview,
     historyCycles,
+    schedulingConfig,
+    allCycles,
     employeeDraftComplete,
     employeeAlreadySubmitted,
     publicMatrixRows,
@@ -551,6 +590,12 @@ export const useAppStore = defineStore('app', () => {
     changeUserParticipation,
     changeUserActive,
     deactivateSelf,
+    loadSchedulingConfig,
+    saveSchedulingConfig,
+    loadAllCycles,
+    createNewCycle,
+    updateExistingCycle,
+    removeCycle,
     loadEmployeeCycle,
     loadLeaderCycle,
     loadPublicResults,

@@ -8,6 +8,7 @@ import { employeeRouter } from './routes/employee.routes.js'
 import { adminRouter } from './routes/admin.routes.js'
 import { cycleRouter } from './routes/cycle.routes.js'
 import './db/init.js'
+import { startScheduler } from './services/scheduling.service.js'
 import { pathToFileURL } from 'node:url'
 
 export const app = express()
@@ -37,4 +38,5 @@ const isMainModule = process.argv[1] && import.meta.url === pathToFileURL(proces
 
 if (isMainModule) {
   startServer()
+  startScheduler()
 }

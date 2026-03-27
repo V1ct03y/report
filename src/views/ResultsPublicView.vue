@@ -10,10 +10,14 @@ import MaskedSurface from '../components/public/MaskedSurface.vue'
 import { useAppStore } from '../stores/app'
 
 const appStore = useAppStore()
-const { cycleSummary, publicEmployees, publicMatrixRows, results, cycleOverview } = storeToRefs(appStore)
+const { cycleSummary, publicEmployees, publicMatrixRows, results, cycleOverview, currentAccount } = storeToRefs(appStore)
+
+const isPrivileged = computed(() => currentAccount.value?.role === 'admin' || currentAccount.value?.role === 'leader')
+const shouldMask = computed(() => !cycleSummary.value.isPublicVisible && !isPrivileged.value)
 
 const rankingRows = computed(() => {
   if (results.value.length) return results.value
+  if (!shouldMask.value) return []
   return publicEmployees.value.map((employee, index) => ({
     employeeId: employee.id,
     name: employee.name,
@@ -80,10 +84,12 @@ onMounted(() => {
       title="匿名评分矩阵"
       :description="cycleSummary.isPublicVisible
         ? '已公示后展示匿名评分矩阵；未完成评分权的成员整行显示 false。'
-        : '未公示前保留完整矩阵骨架，并用 macOS 风格雾化玻璃遮蔽全部内容。'"
+        : isPrivileged
+          ? '管理员/组长视角：结果实时渲染，组员端将以雾化玻璃遮蔽。'
+          : '未公示前保留完整矩阵骨架，并用 macOS 风格雾化玻璃遮蔽全部内容。'"
     >
       <MaskedSurface
-        :masked="!cycleSummary.isPublicVisible"
+        :masked="shouldMask"
         title="评分矩阵暂未公开"
         description="当前仅保留原始矩阵骨架，实际分数将在结算完成并公示后揭示。"
       >
@@ -95,15 +101,17 @@ onMounted(() => {
       title="最终得分与排名"
       :description="cycleSummary.isPublicVisible
         ? '结算完成后展示真实排名与状态。'
-        : '未公示前保留同尺寸表格占位，并用 macOS 风格雾化玻璃遮蔽最终得分与排名。'"
+        : isPrivileged
+          ? '管理员/组长视角：排名实时渲染，组员端将以雾化玻璃遮蔽。'
+          : '未公示前保留同尺寸表格占位，并用 macOS 风格雾化玻璃遮蔽最终得分与排名。'"
     >
       <MaskedSurface
-        :masked="!cycleSummary.isPublicVisible"
+        :masked="shouldMask"
         title="最终排名待公示"
         description="表格维持同样的行列结构，只在正式公示时解除遮罩并显示分数。"
         compact
       >
-        <table class="results-table">
+        <table v-if="rankingRows.length" class="results-table">
           <thead>
             <tr>
               <th>排名</th>
@@ -115,32 +123,36 @@ onMounted(() => {
           </thead>
           <tbody>
             <tr v-for="item in rankingRows" :key="item.employeeId">
-              <td>{{ cycleSummary.isPublicVisible ? `#${item.rank}` : '—' }}</td>
+              <td>#{{ item.rank }}</td>
               <td>{{ item.name }}</td>
               <td>{{ item.department }}</td>
-              <td>{{ cycleSummary.isPublicVisible ? item.finalScore.toFixed(2) : '—' }}</td>
+              <td>{{ item.finalScore.toFixed(2) }}</td>
               <td>
-                <StatusBadge :tone="cycleSummary.isPublicVisible && item.isBottomTwo ? 'danger' : item.usedVotingRight ? 'success' : 'muted'">
+                <StatusBadge :tone="item.isBottomTwo ? 'danger' : item.usedVotingRight ? 'success' : 'muted'">
                   {{
-                    cycleSummary.isPublicVisible
-                      ? item.isBottomTwo
-                        ? '倒数两名'
-                        : item.usedVotingRight
-                          ? '评分权有效'
-                          : '未使用评分权'
-                      : '待公示'
+                    item.isBottomTwo
+                      ? '倒数两名'
+                      : item.usedVotingRight
+                        ? '评分权有效'
+                        : '未使用评分权'
                   }}
                 </StatusBadge>
               </td>
             </tr>
           </tbody>
         </table>
+        <div v-else class="results-empty">当前还没有可展示的结算排名。</div>
       </MaskedSurface>
     </TableSection>
   </div>
 </template>
 
 <style scoped>
+.results-empty {
+  padding: 1rem 0.75rem;
+  color: var(--text-soft);
+}
+
 .results-table {
   width: 100%;
   border-collapse: collapse;
