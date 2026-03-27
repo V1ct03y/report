@@ -27,6 +27,9 @@ test('fresh init seeds two archived history weeks and one current unsettled week
   assert.ok(['active', 'closed'].includes(overview.workCycle?.status || ''))
   assert.equal(overview.upcomingCycle?.week_number, 4)
 
+  const draftCount = db.prepare("SELECT COUNT(*) AS count FROM rating_cycles WHERE status = 'draft'").get().count
+  assert.equal(draftCount, 20)
+
   const historyWeeks = listCycleHistoryPure().map((cycle) => cycle.week_number)
   assert.deepEqual(historyWeeks, [2, 1])
 })
@@ -41,12 +44,15 @@ test('fresh init seeds historical ranking and anonymous matrix data for week 1 a
   }
 })
 
-test('reconcile keeps the acceptance timeline at four weeks instead of creating extra demo weeks', () => {
+test('reconcile keeps the acceptance timeline at week 3 and preserves a 20-cycle future window', () => {
   reconcileCycleTimeline('2026-03-27 12:00:00')
 
   const weeks = db.prepare('SELECT week_number, status FROM rating_cycles ORDER BY week_number ASC').all()
-  assert.deepEqual(
-    weeks.map((row) => row.week_number),
-    [1, 2, 3, 4]
-  )
+  const currentWeek = weeks.find((row) => row.status === 'active' || row.status === 'closed')
+  const futureWeeks = weeks.filter((row) => row.status === 'draft').map((row) => row.week_number)
+
+  assert.equal(currentWeek?.week_number, 3)
+  assert.equal(futureWeeks.length, 20)
+  assert.equal(futureWeeks[0], 4)
+  assert.equal(futureWeeks.at(-1), 23)
 })

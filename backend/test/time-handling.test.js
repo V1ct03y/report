@@ -68,10 +68,10 @@ test('createCycle normalizes datetime-local strings into SQL timestamps', () => 
 
   const created = createCycle({
     name: 'Manual test cycle',
-    start_at: '2026-04-01T20:00',
-    end_at: '2026-04-03T20:00'
+    start_at: '2026-09-01T20:00',
+    end_at: '2026-09-03T20:00'
   })
 
-  assert.equal(created.start_at, '2026-04-01 20:00:00')
-  assert.equal(created.end_at, '2026-04-03 20:00:00')
+  assert.equal(created.start_at, '2026-09-01 20:00:00')
+  assert.equal(created.end_at, '2026-09-03 20:00:00')
 })

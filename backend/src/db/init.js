@@ -1,6 +1,11 @@
 import { db } from './client.js'
 import { hashPassword } from '../utils/crypto.js'
-import { currentSqlTimestamp, safeEnsureCycleColumns, seedWeeklyCycles } from '../services/cycle-lifecycle.service.js'
+import {
+  currentSqlTimestamp,
+  ensurePlannedCycleWindow,
+  safeEnsureCycleColumns,
+  seedWeeklyCycles
+} from '../services/cycle-lifecycle.service.js'
 import { saveEmployeeScores, saveManagerScores } from '../services/score.service.js'
 import { settleCycle } from '../services/settlement.service.js'
 import { archiveCycle, publishCycle } from '../services/cycle-control.service.js'
@@ -302,5 +307,6 @@ seedWeeklyCycles()
 if (cycleCount <= 1) {
   seedAcceptanceHistoryData()
 }
+ensurePlannedCycleWindow(20)
 
 console.log('Database initialized.')

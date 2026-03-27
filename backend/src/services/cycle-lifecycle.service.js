@@ -104,16 +104,8 @@ export function safeEnsureCycleColumns() {
   `)
 }
 
-export function seedWeeklyCycles(now = new Date()) {
-  const count = db.prepare('SELECT COUNT(*) as count FROM rating_cycles').get().count
-  if (count > 1) return
-
-  db.prepare('DELETE FROM rating_cycles').run()
-
-  const currentStart = getWeekAnchor(now)
-  const currentEnd = new Date(currentStart.getTime() + CYCLE_DURATION_MS)
-  const currentStatus = now.getTime() >= currentEnd.getTime() ? 'closed' : 'active'
-  const insert = db.prepare(`
+function insertPlannedCycle(...params) {
+  return db.prepare(`
     INSERT INTO rating_cycles (
       name,
       week_number,
@@ -128,7 +120,28 @@ export function seedWeeklyCycles(now = new Date()) {
       settle_mode
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `)
+  `).run(...params)
+}
+
+function deriveNextPlannedCycle(previousCycle) {
+  const nextStart = new Date(parseSqlTime(previousCycle.start_at).getTime() + WEEK_MS)
+  const nextEnd = new Date(nextStart.getTime() + CYCLE_DURATION_MS)
+
+  return {
+    start_at: formatSqlTime(nextStart),
+    end_at: formatSqlTime(nextEnd)
+  }
+}
+
+export function seedWeeklyCycles(now = new Date()) {
+  const count = db.prepare('SELECT COUNT(*) as count FROM rating_cycles').get().count
+  if (count > 1) return
+
+  db.prepare('DELETE FROM rating_cycles').run()
+
+  const currentStart = getWeekAnchor(now)
+  const currentEnd = new Date(currentStart.getTime() + CYCLE_DURATION_MS)
+  const currentStatus = now.getTime() >= currentEnd.getTime() ? 'closed' : 'active'
 
   const weeks = [
     { weekNumber: 1, start: new Date(currentStart.getTime() - WEEK_MS * 2), status: 'settled', published: true, archived: true, settleMode: 'automatic' },
@@ -146,7 +159,7 @@ export function seedWeeklyCycles(now = new Date()) {
       ? formatSqlTime(new Date(week.start.getTime() + CYCLE_DURATION_MS + 60 * 60 * 1000))
       : null
 
-    insert.run(
+    insertPlannedCycle(
       makeWeekName(week.weekNumber),
       week.weekNumber,
       startAt,
@@ -160,51 +173,49 @@ export function seedWeeklyCycles(now = new Date()) {
       week.settleMode
     )
   }
+
+  ensurePlannedCycleWindow(20)
 }
 
-export function ensureUpcomingCycle(now = currentSqlTimestamp()) {
-  const current = parseSqlTime(now)
-  if (!current) return null
+export function ensurePlannedCycleWindow(targetDraftCount = 20) {
+  const cycles = listCycles()
+  if (!cycles.length) return []
 
-  const existing = db.prepare('SELECT * FROM rating_cycles ORDER BY week_number ASC, id ASC').all()
-  const maxWeek = existing.reduce((max, cycle) => Math.max(max, Number(cycle.week_number || 0)), 0)
+  const futureDrafts = cycles.filter((cycle) => cycle.status === 'draft')
+  if (futureDrafts.length >= targetDraftCount) return []
 
-  if (!existing.length) return null
+  const created = []
+  let anchor = cycles[cycles.length - 1]
 
-  const anchor = getWeekAnchor(current)
-  const targetStarts = [
-    new Date(anchor.getTime()),
-    new Date(anchor.getTime() + WEEK_MS)
-  ]
-
-  const insert = db.prepare(`
-    INSERT INTO rating_cycles (name, week_number, start_at, end_at, status, public_at, is_archived, settle_mode)
-    VALUES (?, ?, ?, ?, 'draft', NULL, 0, 'automatic')
-  `)
-
-  let nextWeekNumber = maxWeek + 1
-  let created = null
-  for (const start of targetStarts) {
-    const startSql = formatSqlTime(start)
-    const exists = db.prepare('SELECT * FROM rating_cycles WHERE start_at = ? LIMIT 1').get(startSql)
-    if (exists) continue
-
-    const end = new Date(start.getTime() + CYCLE_DURATION_MS)
-    insert.run(
+  while (futureDrafts.length + created.length < targetDraftCount) {
+    const nextWeekNumber = Number(anchor.week_number || 0) + 1
+    const nextCycle = deriveNextPlannedCycle(anchor)
+    insertPlannedCycle(
       makeWeekName(nextWeekNumber),
       nextWeekNumber,
-      startSql,
-      formatSqlTime(end)
+      nextCycle.start_at,
+      nextCycle.end_at,
+      'draft',
+      null,
+      null,
+      0,
+      null,
+      null,
+      'automatic'
     )
-    created = db.prepare('SELECT * FROM rating_cycles WHERE week_number = ?').get(nextWeekNumber)
-    nextWeekNumber += 1
+    anchor = db.prepare('SELECT * FROM rating_cycles WHERE week_number = ?').get(nextWeekNumber)
+    created.push(anchor)
   }
 
-  return created
+  return created.map(withPublicationState)
+}
+
+export function ensureUpcomingCycle() {
+  return ensurePlannedCycleWindow(20)
 }
 
 export function reconcileCycleTimeline(now = currentSqlTimestamp()) {
-  ensureUpcomingCycle(now)
+  ensurePlannedCycleWindow(20)
 
   const tx = db.transaction(() => {
     db.prepare(`
