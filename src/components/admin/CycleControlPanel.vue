@@ -22,26 +22,56 @@ const nextActionCycle = computed(() => props.control.pendingPublicationCycle || 
 const nextAction = computed(() => {
   const cycle = nextActionCycle.value
   if (!cycle) {
-    return { label: '同步周期状态', tone: 'muted' as const, action: 'reconcile' as const, description: '当前没有可操作周期，先手动同步一次状态。' }
+    return {
+      label: '同步周期状态',
+      tone: 'muted' as const,
+      action: 'reconcile' as const,
+      description: '当前没有待处理周期，先手动同步一次，让系统按时间推进现有计划。'
+    }
   }
 
   if (cycle.phase === 'settled') {
-    return { label: '确认公示', tone: 'warning' as const, action: 'publish' as const, description: '结算结果已经生成，但还没有对成员公开。' }
+    return {
+      label: '确认公示',
+      tone: 'warning' as const,
+      action: 'publish' as const,
+      description: '本周结果已经结算完成，现在只差最后一步正式公示。'
+    }
   }
 
   if (cycle.phase === 'closed') {
-    return { label: '执行结算', tone: 'warning' as const, action: 'settle' as const, description: '本期评分已截止，下一步应该先生成结算结果。' }
+    return {
+      label: '执行结算',
+      tone: 'warning' as const,
+      action: 'settle' as const,
+      description: '当前周期已经截止，下一步应该先生成结算结果。'
+    }
   }
 
   if (cycle.phase === 'open') {
-    return { label: '手动结算', tone: 'warning' as const, action: 'settle' as const, description: '当前周期仍在进行中，但你可以显式提前执行结算。' }
+    return {
+      label: '手动结算',
+      tone: 'warning' as const,
+      action: 'settle' as const,
+      description: '当前周期仍在进行中，但你可以提前结束并手动结算。'
+    }
   }
 
   if (cycle.phase === 'published') {
-    return { label: '归档公示', tone: 'success' as const, action: 'archive' as const, description: '本期已经公开展示，可以在确认后归档。' }
+    return {
+      label: '归档公示',
+      tone: 'success' as const,
+      action: 'archive' as const,
+      description: '这期结果已经完成公示，可以在确认后归入历史。'
+    }
   }
 
-  return { label: '同步周期状态', tone: 'muted' as const, action: 'reconcile' as const, description: '当前没有待处理动作，手动同步一次以刷新阶段。' }
+  return {
+    label: '同步周期状态',
+    tone: 'muted' as const,
+    action: 'reconcile' as const,
+    description: '当前没有需要立即点击的动作，手动同步一次可以刷新所有周期阶段。'
+  }
 })
 
 function formatWhen(value?: string | null) {
@@ -105,13 +135,6 @@ function handlePrimaryAction() {
         <StatusBadge tone="warning">{{ phaseLabel(control.pendingPublicationCycle) }}</StatusBadge>
         <p>结算 {{ formatWhen(control.pendingPublicationCycle?.settled_at) }}</p>
       </article>
-
-      <article class="surface-card summary-card">
-        <span class="summary-card__label">当前公示周期</span>
-        <strong>{{ control.publishedCycle?.name || '暂无' }}</strong>
-        <StatusBadge tone="success">{{ phaseLabel(control.publishedCycle) }}</StatusBadge>
-        <p>公示 {{ formatWhen(control.publishedCycle?.published_at) }}</p>
-      </article>
     </div>
   </section>
 </template>
@@ -125,13 +148,19 @@ function handlePrimaryAction() {
 .control-panel__hero {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 1.2rem;
+  gap: 1.2rem;
+  padding: 1.25rem;
   align-items: center;
 }
 
+.control-panel__copy {
+  display: grid;
+  gap: 0.4rem;
+  max-width: 48rem;
+}
+
 .control-panel__copy h3 {
-  margin: 0.45rem 0 0.35rem;
+  margin: 0;
 }
 
 .control-panel__copy p {
@@ -144,18 +173,27 @@ function handlePrimaryAction() {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .control-panel__grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.9rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
 }
 
 .summary-card {
   display: grid;
-  gap: 0.45rem;
-  padding: 1rem;
+  gap: 0.5rem;
+  padding: 1.1rem;
+  min-height: 11rem;
+  align-content: start;
+}
+
+.summary-card strong {
+  font-family: var(--font-display);
+  font-size: 1.65rem;
+  line-height: 1.1;
 }
 
 .summary-card__label {
@@ -172,6 +210,10 @@ function handlePrimaryAction() {
   .control-panel__hero {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .control-panel__actions {
+    justify-content: flex-start;
   }
 
   .control-panel__grid {

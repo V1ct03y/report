@@ -1,92 +1,114 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import dayjs from 'dayjs'
 
 import CycleControlPanel from '../components/admin/CycleControlPanel.vue'
-import CycleTimelineList from '../components/admin/CycleTimelineList.vue'
 import StatCard from '../components/common/StatCard.vue'
 import StatusBadge from '../components/common/StatusBadge.vue'
 import TableSection from '../components/common/TableSection.vue'
 import { useAppStore } from '../stores/app'
-import type { Role, SchedulingConfig } from '../types'
+import type { CycleRecord, Role } from '../types'
 
 const appStore = useAppStore()
 const {
   cycleSummary,
   results,
-  submissions,
   users,
   cycleOverview,
   adminCycleControl,
-  schedulingConfig,
   allCycles
 } = storeToRefs(appStore)
 
 const memberForm = reactive({ username: '', fullName: '', password: 'ChangeMe123!' })
-const scheduleForm = reactive({
-  enabled: 0,
-  open_day: 3,
-  open_hour: 20,
-  open_minute: 0,
-  close_day: 5,
-  close_hour: 20,
-  close_minute: 0,
-  auto_settle: 1
-})
 const editForm = reactive({ start_at: '', end_at: '' })
-const cycleForm = reactive({ name: '', start_at: '', end_at: '' })
 
-const scheduleSaving = ref(false)
-const creatingCycle = ref(false)
 const deletingCycleId = ref<number | null>(null)
 const editingCycleId = ref<number | null>(null)
 const actionBusy = ref(false)
 
-const weekDays = [
-  { value: 1, label: '周一' },
-  { value: 2, label: '周二' },
-  { value: 3, label: '周三' },
-  { value: 4, label: '周四' },
-  { value: 5, label: '周五' },
-  { value: 6, label: '周六' },
-  { value: 7, label: '周日' }
-]
+const riskyEmployees = computed(() => (
+  cycleSummary.value.isPublicVisible
+    ? results.value.filter((item) => item.isBottomTwo)
+    : []
+))
 
-const riskyEmployees = computed(() => cycleSummary.value.isPublicVisible ? results.value.filter((item) => item.isBottomTwo) : [])
 const hasWorkCycle = computed(() => Boolean(cycleOverview.value.workCycle))
-
-function loadScheduleForm(cfg: SchedulingConfig) {
-  scheduleForm.enabled = cfg.enabled
-  scheduleForm.open_day = cfg.open_day
-  scheduleForm.open_hour = cfg.open_hour
-  scheduleForm.open_minute = cfg.open_minute
-  scheduleForm.close_day = cfg.close_day
-  scheduleForm.close_hour = cfg.close_hour
-  scheduleForm.close_minute = cfg.close_minute
-  scheduleForm.auto_settle = cfg.auto_settle
-}
-
-watch(schedulingConfig, (cfg) => {
-  if (cfg) loadScheduleForm(cfg)
-}, { immediate: true })
 
 function formatCycleDate(raw: string | null) {
   if (!raw) return '未设置'
   return dayjs(raw).format('MM/DD HH:mm')
 }
 
-function statusLabel(status: string) {
-  const map: Record<string, string> = {
-    draft: '待开始',
-    active: '进行中',
-    closed: '待结算',
-    settled: '已结算'
-  }
-  return map[status] || status
+function resolveCycleName(cycle: CycleRecord) {
+  if (cycle.name) return cycle.name
+  if (cycle.week_number != null) return `第${cycle.week_number}周工作评分`
+  return `周期 #${cycle.id}`
 }
 
-function startEditCycle(cycle: any) {
+function resolveCyclePhase(cycle: CycleRecord) {
+  if (cycle.archived_at || cycle.is_archived === 1) return 'archived'
+  if (cycle.published_at || cycle.public_at) return 'published'
+  if (cycle.status === 'settled') return 'settled'
+  if (cycle.status === 'closed') return 'closed'
+  if (cycle.status === 'active') return 'open'
+  return 'planned'
+}
+
+function statusTone(cycle: CycleRecord) {
+  const phase = resolveCyclePhase(cycle)
+  if (phase === 'published') return 'success'
+  if (phase === 'settled' || phase === 'closed' || phase === 'open') return 'warning'
+  return 'muted'
+}
+
+function statusLabel(cycle: CycleRecord) {
+  const labels: Record<string, string> = {
+    planned: '待开始',
+    open: '进行中',
+    closed: '待结算',
+    settled: '待公示',
+    published: '公示中',
+    archived: '已归档'
+  }
+  return labels[resolveCyclePhase(cycle)] || cycle.status
+}
+
+function cycleMetaText(cycle: CycleRecord) {
+  if (cycle.archived_at) {
+    return `归档于 ${dayjs(cycle.archived_at).format('MM/DD HH:mm')}`
+  }
+  if (cycle.published_at) {
+    return `公示于 ${dayjs(cycle.published_at).format('MM/DD HH:mm')}`
+  }
+  if (cycle.settled_at) {
+    return `结算于 ${dayjs(cycle.settled_at).format('MM/DD HH:mm')}`
+  }
+  return '未调整则沿用默认周计划时间'
+}
+
+function canEditCycle(cycle: CycleRecord) {
+  return resolveCyclePhase(cycle) === 'planned'
+}
+
+function canDeleteCycle(cycle: CycleRecord) {
+  return resolveCyclePhase(cycle) === 'planned'
+}
+
+function canSettleCycle(cycle: CycleRecord) {
+  const phase = resolveCyclePhase(cycle)
+  return phase === 'open' || phase === 'closed'
+}
+
+function canPublishCycle(cycle: CycleRecord) {
+  return resolveCyclePhase(cycle) === 'settled'
+}
+
+function canArchiveCycle(cycle: CycleRecord) {
+  return resolveCyclePhase(cycle) === 'published'
+}
+
+function startEditCycle(cycle: CycleRecord) {
   editingCycleId.value = cycle.id
   editForm.start_at = cycle.start_at ? dayjs(cycle.start_at).format('YYYY-MM-DDTHH:mm') : ''
   editForm.end_at = cycle.end_at ? dayjs(cycle.end_at).format('YYYY-MM-DDTHH:mm') : ''
@@ -94,15 +116,8 @@ function startEditCycle(cycle: any) {
 
 function cancelEditCycle() {
   editingCycleId.value = null
-}
-
-async function saveSchedule() {
-  scheduleSaving.value = true
-  try {
-    await appStore.saveSchedulingConfig({ ...scheduleForm })
-  } finally {
-    scheduleSaving.value = false
-  }
+  editForm.start_at = ''
+  editForm.end_at = ''
 }
 
 async function saveCycle() {
@@ -111,24 +126,7 @@ async function saveCycle() {
     start_at: editForm.start_at || undefined,
     end_at: editForm.end_at || undefined
   })
-  editingCycleId.value = null
-}
-
-async function handleCreateCycle() {
-  if (creatingCycle.value) return
-  creatingCycle.value = true
-  try {
-    await appStore.createNewCycle({
-      name: cycleForm.name || undefined,
-      start_at: cycleForm.start_at || undefined,
-      end_at: cycleForm.end_at || undefined
-    })
-    cycleForm.name = ''
-    cycleForm.start_at = ''
-    cycleForm.end_at = ''
-  } finally {
-    creatingCycle.value = false
-  }
+  cancelEditCycle()
 }
 
 async function handleDeleteCycle(id: number) {
@@ -140,20 +138,17 @@ async function handleDeleteCycle(id: number) {
   }
 }
 
-async function handleSettle() {
-  const cycleId = adminCycleControl.value.pendingPublicationCycle?.id || adminCycleControl.value.currentCycle?.id
-  if (!cycleId) return
+async function handleSettle(cycleId?: number) {
+  const resolvedId = cycleId
+    ?? adminCycleControl.value.pendingPublicationCycle?.id
+    ?? adminCycleControl.value.currentCycle?.id
+  if (!resolvedId) return
   actionBusy.value = true
   try {
-    await appStore.settleCycle(cycleId)
+    await appStore.settleCycle(resolvedId)
   } finally {
     actionBusy.value = false
   }
-}
-
-async function handleAutomaticSettle() {
-  await appStore.triggerAutomaticSettlement()
-  await appStore.loadDashboard()
 }
 
 async function handlePublish(id: number) {
@@ -211,7 +206,6 @@ onMounted(() => {
   appStore.loadDashboard().catch(() => undefined)
   appStore.loadPublicResults().catch(() => undefined)
   appStore.loadAdminCycleControl().catch(() => undefined)
-  appStore.loadSchedulingConfig().catch(() => undefined)
   appStore.loadAllCycles().catch(() => undefined)
 })
 </script>
@@ -225,7 +219,7 @@ onMounted(() => {
       <StatCard title="风险成员" :value="cycleSummary.bottomTwoNames" detail="如果本期已公示，这里会显示倒数两名。" />
     </section>
 
-    <TableSection title="周期控制中心" description="把结算、公示、归档拆成显式动作，管理员只需要处理眼前的下一步。">
+    <TableSection title="周期控制中心" description="结算、公示、归档都只保留成眼前这一步，管理员不用再切换多块面板。">
       <CycleControlPanel
         :control="adminCycleControl"
         :busy="actionBusy"
@@ -234,125 +228,104 @@ onMounted(() => {
         @archive="handleArchive"
         @reconcile="handleReconcile"
       />
-      <CycleTimelineList :control="adminCycleControl" />
     </TableSection>
 
-    <TableSection title="自动调度配置" :description="schedulingConfig?.description ?? '加载中…'">
-      <template #actions>
-        <label class="toggle-cell schedule-toggle">
-          <input v-model.number="scheduleForm.enabled" type="checkbox" :true-value="1" :false-value="0" />
-          <span>{{ scheduleForm.enabled ? '自动调度已启用' : '自动调度已禁用' }}</span>
-        </label>
-      </template>
+    <TableSection title="周期列表" description="系统会预生成未来 20 周计划；如果你没有改时间，就按默认周节奏自动推进。">
+      <div class="cycle-board">
+        <div class="overview-grid">
+          <article class="surface-card overview-card">
+            <span class="overview-card__label">当前阶段</span>
+            <strong>{{ cycleSummary.stageLabel }}</strong>
+            <p>{{ cycleSummary.deadlineExact }}</p>
+          </article>
 
-      <div class="schedule-grid">
-        <div class="schedule-row">
-          <span class="schedule-label">自动开周期</span>
-          <select v-model.number="scheduleForm.open_day" class="select-input schedule-select">
-            <option v-for="d in weekDays" :key="d.value" :value="d.value">{{ d.label }}</option>
-          </select>
-          <input v-model.number="scheduleForm.open_hour" type="number" min="0" max="23" class="time-input" />
-          <span class="time-sep">:</span>
-          <input v-model.number="scheduleForm.open_minute" type="number" min="0" max="59" class="time-input" />
+          <article class="surface-card overview-card">
+            <span class="overview-card__label">关注成员</span>
+            <div class="chip-list">
+              <StatusBadge v-for="employee in riskyEmployees" :key="employee.employeeId" tone="danger">
+                {{ employee.name }} 位于倒数两名
+              </StatusBadge>
+              <StatusBadge v-if="!riskyEmployees.length" tone="muted">当前没有</StatusBadge>
+            </div>
+          </article>
         </div>
-        <div class="schedule-row">
-          <span class="schedule-label">自动结算</span>
-          <select v-model.number="scheduleForm.close_day" class="select-input schedule-select">
-            <option v-for="d in weekDays" :key="d.value" :value="d.value">{{ d.label }}</option>
-          </select>
-          <input v-model.number="scheduleForm.close_hour" type="number" min="0" max="23" class="time-input" />
-          <span class="time-sep">:</span>
-          <input v-model.number="scheduleForm.close_minute" type="number" min="0" max="59" class="time-input" />
-        </div>
-        <div class="schedule-row">
-          <label class="toggle-cell">
-            <input v-model.number="scheduleForm.auto_settle" type="checkbox" :true-value="1" :false-value="0" />
-            <span>结算后自动开启下一周期</span>
-          </label>
-        </div>
-      </div>
 
-      <div v-if="schedulingConfig" class="schedule-next">
-        <span class="schedule-next__label">下次事件</span>
-        <span>开周期：{{ dayjs(schedulingConfig.nextOpenAt).format('YYYY-MM-DD HH:mm') }}</span>
-        <span>结算：{{ dayjs(schedulingConfig.nextCloseAt).format('YYYY-MM-DD HH:mm') }}</span>
-      </div>
+        <div class="cycle-list">
+          <article
+            v-for="cycle in allCycles"
+            :key="cycle.id"
+            class="cycle-item surface-card"
+          >
+            <div class="cycle-item__main">
+              <div class="cycle-item__title">
+                <strong>{{ resolveCycleName(cycle) }}</strong>
+                <StatusBadge :tone="statusTone(cycle)">{{ statusLabel(cycle) }}</StatusBadge>
+              </div>
+              <p class="cycle-item__dates">{{ formatCycleDate(cycle.start_at) }} - {{ formatCycleDate(cycle.end_at) }}</p>
+              <p class="cycle-item__meta">{{ cycleMetaText(cycle) }}</p>
+            </div>
 
-      <div class="schedule-actions">
-        <button class="primary-button" type="button" :disabled="scheduleSaving" @click="saveSchedule">
-          {{ scheduleSaving ? '保存中…' : '保存调度配置' }}
-        </button>
-        <span class="schedule-hint">手动建周期与自动调度现在分离，是否自动运行只由这里决定。</span>
-      </div>
-    </TableSection>
+            <div class="cycle-item__actions">
+              <template v-if="editingCycleId === cycle.id">
+                <input v-model="editForm.start_at" type="datetime-local" class="cycle-input cycle-input--inline" />
+                <input v-model="editForm.end_at" type="datetime-local" class="cycle-input cycle-input--inline" />
+                <button class="cycle-action-button cycle-action-button--primary" type="button" @click="saveCycle">
+                  保存时间
+                </button>
+                <button class="cycle-action-button" type="button" @click="cancelEditCycle">
+                  取消
+                </button>
+              </template>
 
-    <TableSection title="周期列表" description="未来周期、草稿周期和当前周期统一在这里维护。">
-      <div class="cycle-create">
-        <input v-model="cycleForm.name" type="text" placeholder="周期名称（可选）" class="cycle-input" />
-        <input v-model="cycleForm.start_at" type="datetime-local" class="cycle-input" />
-        <input v-model="cycleForm.end_at" type="datetime-local" class="cycle-input" />
-        <button class="primary-button" type="button" :disabled="creatingCycle" @click="handleCreateCycle">
-          {{ creatingCycle ? '创建中…' : '新增周期' }}
-        </button>
-        <button class="secondary-button" type="button" @click="handleAutomaticSettle">触发自动结算</button>
-      </div>
-
-      <div class="overview-grid overview-grid--four">
-        <article class="surface-card overview-card">
-          <h4>当前阶段</h4>
-          <p>{{ cycleSummary.stageLabel }}</p>
-          <h4>当前截止时间</h4>
-          <p>{{ cycleSummary.deadlineExact }}</p>
-        </article>
-
-        <article class="surface-card overview-note">
-          <h4>关注成员</h4>
-          <div class="chip-list">
-            <StatusBadge v-for="employee in riskyEmployees" :key="employee.employeeId" tone="danger">
-              {{ employee.name }} 位于倒数两名
-            </StatusBadge>
-            <StatusBadge v-if="!riskyEmployees.length" tone="muted">当前没有</StatusBadge>
-          </div>
-        </article>
-      </div>
-
-      <div class="cycle-list">
-        <div
-          v-for="cycle in allCycles"
-          :key="cycle.id"
-          class="cycle-item surface-card"
-          :class="{ 'cycle-item--settled': cycle.status === 'settled', 'cycle-item--draft': cycle.status === 'draft' }"
-        >
-          <div class="cycle-item__info">
-            <strong>{{ cycle.name || `第${cycle.week_number ?? '-'}周` }}</strong>
-            <StatusBadge :tone="cycle.status === 'settled' ? 'success' : cycle.status === 'active' ? 'warning' : 'muted'">
-              {{ statusLabel(cycle.status) }}
-            </StatusBadge>
-            <span class="cycle-item__dates">{{ formatCycleDate(cycle.start_at) }} - {{ formatCycleDate(cycle.end_at) }}</span>
-          </div>
-
-          <div class="cycle-item__actions">
-            <template v-if="editingCycleId === cycle.id">
-              <input v-model="editForm.start_at" type="datetime-local" class="cycle-input cycle-input--inline" />
-              <input v-model="editForm.end_at" type="datetime-local" class="cycle-input cycle-input--inline" />
-              <button class="secondary-button" type="button" @click="saveCycle">保存</button>
-              <button class="secondary-button" type="button" @click="cancelEditCycle">取消</button>
-            </template>
-            <template v-else>
-              <button v-if="cycle.status === 'draft'" class="secondary-button" type="button" @click="startEditCycle(cycle)">
-                调整时间
-              </button>
-              <button
-                v-if="cycle.status === 'draft'"
-                class="danger-button"
-                type="button"
-                :disabled="deletingCycleId === cycle.id"
-                @click="handleDeleteCycle(cycle.id)"
-              >
-                {{ deletingCycleId === cycle.id ? '删除中…' : '删除' }}
-              </button>
-            </template>
-          </div>
+              <template v-else>
+                <button
+                  v-if="canSettleCycle(cycle)"
+                  class="cycle-action-button cycle-action-button--primary"
+                  type="button"
+                  :disabled="actionBusy"
+                  @click="handleSettle(cycle.id)"
+                >
+                  手动结算
+                </button>
+                <button
+                  v-if="canPublishCycle(cycle)"
+                  class="cycle-action-button cycle-action-button--primary"
+                  type="button"
+                  :disabled="actionBusy"
+                  @click="handlePublish(cycle.id)"
+                >
+                  确认公示
+                </button>
+                <button
+                  v-if="canArchiveCycle(cycle)"
+                  class="cycle-action-button"
+                  type="button"
+                  :disabled="actionBusy"
+                  @click="handleArchive(cycle.id)"
+                >
+                  归档
+                </button>
+                <button
+                  v-if="canEditCycle(cycle)"
+                  class="cycle-action-button"
+                  type="button"
+                  :disabled="actionBusy"
+                  @click="startEditCycle(cycle)"
+                >
+                  调整时间
+                </button>
+                <button
+                  v-if="canDeleteCycle(cycle)"
+                  class="cycle-action-button cycle-action-button--danger"
+                  type="button"
+                  :disabled="deletingCycleId === cycle.id || actionBusy"
+                  @click="handleDeleteCycle(cycle.id)"
+                >
+                  {{ deletingCycleId === cycle.id ? '删除中…' : '删除' }}
+                </button>
+              </template>
+            </div>
+          </article>
         </div>
       </div>
     </TableSection>
@@ -423,63 +396,10 @@ onMounted(() => {
         </tbody>
       </table>
     </TableSection>
-
-    <TableSection title="结果预览" description="管理员可在这里预览当前公示周期或待公示周期的结果。">
-      <table class="dashboard-table">
-        <thead>
-          <tr>
-            <th>成员</th>
-            <th>提交时间</th>
-            <th>投票权</th>
-            <th>最终分</th>
-            <th>排名</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in results" :key="item.employeeId">
-            <td>{{ item.name }}</td>
-            <td>{{ submissions[item.employeeId]?.submittedAt ?? '未提交' }}</td>
-            <td>{{ submissions[item.employeeId]?.usedVotingRight ? '有效' : '无效' }}</td>
-            <td>{{ item.finalScore.toFixed(2) }}</td>
-            <td>#{{ item.rank }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </TableSection>
   </div>
 </template>
 
 <style scoped>
-.overview-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.overview-card,
-.overview-note {
-  padding: 1.15rem;
-}
-
-.overview-card h4,
-.overview-note h4 {
-  margin: 0.9rem 0 0.45rem;
-  font-family: var(--font-display);
-}
-
-.overview-card p,
-.overview-note ul {
-  margin: 0;
-  color: var(--text-muted);
-  line-height: 1.75;
-}
-
-.chip-list {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
 .dashboard-table {
   width: 100%;
   border-collapse: collapse;
@@ -517,184 +437,185 @@ onMounted(() => {
   align-items: center;
 }
 
-.schedule-toggle {
-  font-size: 0.9rem;
-  color: var(--text-soft);
-}
-
-.schedule-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin: 0.75rem 0;
-}
-
-.schedule-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.schedule-label {
-  min-width: 6rem;
-  font-size: 0.9rem;
-  color: var(--text-soft);
-}
-
-.schedule-select {
-  min-width: 5rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: 10px;
-  border: 1px solid rgba(213, 176, 132, 0.8);
-  background: rgba(255, 253, 249, 0.96);
-  font-size: 0.88rem;
-}
-
-.time-input {
-  width: 3.5rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: 10px;
-  border: 1px solid rgba(213, 176, 132, 0.8);
-  background: rgba(255, 253, 249, 0.96);
-  font-size: 0.88rem;
-  text-align: center;
-}
-
-.time-sep {
-  font-weight: 600;
-  color: var(--text-soft);
-}
-
-.schedule-next {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.65rem 0.9rem;
-  border-radius: 12px;
-  background: rgba(213, 176, 132, 0.12);
-  font-size: 0.85rem;
-  color: var(--text-soft);
-  margin-bottom: 0.75rem;
-}
-
-.schedule-next__label {
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.schedule-actions {
-  display: flex;
-  align-items: center;
+.cycle-board {
+  display: grid;
   gap: 1rem;
 }
 
-.schedule-hint {
-  font-size: 0.82rem;
-  color: var(--text-soft);
-}
-
-.overview-grid--four {
-  margin-bottom: 1rem;
-}
-
-.cycle-create {
+.overview-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto auto;
-  gap: 0.6rem;
-  margin-bottom: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
 }
 
-.cycle-input {
-  padding: 0.5rem 0.7rem;
-  border-radius: 12px;
-  border: 1px solid rgba(213, 176, 132, 0.8);
-  background: rgba(255, 253, 249, 0.96);
-  font-size: 0.88rem;
-  width: 100%;
+.overview-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1.15rem;
+  min-height: 9.5rem;
+  align-content: start;
 }
 
-.cycle-input--inline {
-  width: auto;
-  flex: 1;
+.overview-card strong {
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  line-height: 1.15;
+}
+
+.overview-card__label {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.overview-card p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.chip-list {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .cycle-list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.8rem;
 }
 
 .cycle-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  border-radius: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 1rem;
+  align-items: center;
+  padding: 1rem 1.15rem;
 }
 
-.cycle-item__info {
+.cycle-item__main {
+  min-width: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.cycle-item__title {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
 }
 
-.cycle-item__info strong {
+.cycle-item__title strong {
   font-family: var(--font-display);
+  font-size: 1.15rem;
 }
 
-.cycle-item__dates {
-  font-size: 0.85rem;
+.cycle-item__dates,
+.cycle-item__meta {
+  margin: 0;
   color: var(--text-soft);
+}
+
+.cycle-item__meta {
+  font-size: 0.85rem;
 }
 
 .cycle-item__actions {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: flex-end;
+  gap: 0.65rem;
   flex-wrap: wrap;
 }
 
-.danger-button {
-  padding: 0.4rem 0.75rem;
-  border-radius: 10px;
-  border: 1px solid rgba(184, 91, 70, 0.6);
-  background: rgba(184, 91, 70, 0.08);
-  color: #b86b50;
-  font-size: 0.83rem;
+.cycle-input {
+  padding: 0.62rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(213, 176, 132, 0.8);
+  background: rgba(255, 253, 249, 0.96);
+  font-size: 0.9rem;
+  width: 100%;
+}
+
+.cycle-input--inline {
+  width: min(14rem, 100%);
+}
+
+.cycle-action-button {
+  min-width: 6.75rem;
+  min-height: 3rem;
+  padding: 0.7rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(213, 176, 132, 0.8);
+  background: rgba(255, 252, 246, 0.96);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
 }
 
-.danger-button:hover {
-  background: rgba(184, 91, 70, 0.16);
+.cycle-action-button:hover {
+  background: rgba(247, 235, 215, 0.95);
+  transform: translateY(-1px);
 }
 
-.danger-button:disabled {
-  opacity: 0.5;
+.cycle-action-button:disabled {
+  opacity: 0.55;
   cursor: not-allowed;
+  transform: none;
+}
+
+.cycle-action-button--primary {
+  background: #e8792c;
+  border-color: #e8792c;
+  color: #fffaf4;
+}
+
+.cycle-action-button--primary:hover {
+  background: #d86c22;
+  border-color: #d86c22;
+}
+
+.cycle-action-button--danger {
+  border-color: rgba(184, 91, 70, 0.65);
+  background: rgba(184, 91, 70, 0.08);
+  color: #b85b46;
+}
+
+.cycle-action-button--danger:hover {
+  background: rgba(184, 91, 70, 0.16);
+  border-color: rgba(184, 91, 70, 0.78);
 }
 
 @media (max-width: 1023px) {
-  .overview-grid {
+  .overview-grid,
+  .member-form {
     grid-template-columns: 1fr;
+  }
+
+  .cycle-item {
+    grid-template-columns: 1fr;
+  }
+
+  .cycle-item__actions {
+    justify-content: flex-start;
   }
 }
 
 @media (max-width: 767px) {
-  .member-form,
-  .cycle-create {
-    grid-template-columns: 1fr;
+  .cycle-item__actions {
+    gap: 0.55rem;
   }
 
-  .schedule-row {
-    flex-wrap: wrap;
-  }
-
-  .schedule-next {
-    flex-direction: column;
-    align-items: flex-start;
+  .cycle-action-button,
+  .cycle-input--inline {
+    width: 100%;
   }
 }
 </style>

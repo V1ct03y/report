@@ -15,7 +15,7 @@ This repository is an anonymous rating and settlement system with a Vue 3 fronte
 - `backend/src/`: Express API, SQLite bootstrap, services, and route handlers.
 - `backend/src/db/init.js`: schema creation, compatibility migration, seed users, and weekly cycle seeding.
 - `backend/src/services/`: cycle lifecycle, settlement, scheduling, auth, and member/admin logic.
-- `e2e/`: Playwright end-to-end coverage for scheduling, settlement, masking, and rating flows.
+- `e2e/`: Playwright end-to-end coverage for cycle-plan management, settlement, masking, and rating flows.
 - `test-results/` and `*.png`: generated debugging artifacts. Do not treat them as source unless the task is specifically about visual/debug output.
 
 ## Core Commands
@@ -59,15 +59,15 @@ Notes:
 
 ```powershell
 npx playwright test
-npx playwright test e2e/admin-scheduling.spec.ts
+npx playwright test e2e/admin-cycle-plan-list.spec.ts
 npx playwright test e2e/full-rating-flow.spec.ts
 ```
 
 Important:
 
-- `playwright.config.ts` currently uses `baseURL: http://localhost:5173`.
-- `vite.config.ts` currently serves on port `4173`.
-- For E2E runs, either start the frontend on `5173` explicitly or update the Playwright config before trusting failures.
+- `playwright.config.ts` uses `baseURL: http://localhost:4173`.
+- `vite.config.ts` serves on port `4173`.
+- The admin dashboard no longer exposes scheduling controls; future-cycle edits happen directly in the 20-cycle plan list.
 
 ## Seed Accounts
 
@@ -118,10 +118,10 @@ Use when local data is stale or incompatible.
 
 - There is no dedicated root lint script right now.
 - `npm run build` is the minimum frontend validation.
-- Playwright is the primary regression layer for role-based flows, masking, scheduling, and settlement.
+- Playwright is the primary regression layer for role-based flows, masking, cycle-plan management, and settlement.
 - Prefer targeted verification over broad reruns, but do not skip E2E when changing:
   - public result masking
-  - settlement timing/scheduling
+  - settlement timing or cycle-plan progression
   - cycle creation/edit/delete behavior
   - login or first-password-reset flow
   - employee/leader/admin permissions
@@ -141,4 +141,4 @@ Use when local data is stale or incompatible.
 - API request failure from UI: inspect `src/api.ts` and the matching backend route.
 - Missing/incorrect cycle data: inspect `backend/src/services/cycle.service.js`, `backend/src/services/cycle-admin.service.js`, and `backend/src/services/cycle-lifecycle.service.js`.
 - Settlement/public-results issue: inspect `backend/src/services/settlement.service.js` and `src/views/ResultsPublicView.vue`.
-- Scheduler issue: inspect `backend/src/services/scheduling.service.js` and admin scheduling UI/E2E coverage.
+- Cycle-plan progression issue: inspect `backend/src/services/scheduling.service.js`, `backend/src/services/cycle-lifecycle.service.js`, and `e2e/admin-cycle-plan-list.spec.ts`.
