@@ -7,6 +7,10 @@ dist/
 *.log
 *.tsbuildinfo
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
+backend/data/
 test-results/
 playwright-report/
 nul
