@@ -6,7 +6,8 @@ import {
   getCycleById,
   getCycleOverviewPure,
   getCurrentPublicCyclePure,
-  getCurrentWorkCyclePure
+  getCurrentWorkCyclePure,
+  getUpcomingCyclePure
 } from '../services/cycle-lifecycle.service.js'
 import { saveManagerScores } from '../services/score.service.js'
 import { settleCycle, getPreviewResults, getPublicResults, settlePendingCycles } from '../services/settlement.service.js'
@@ -23,6 +24,7 @@ import {
   publishCycle,
   reconcileCycleTimeline
 } from '../services/cycle-control.service.js'
+import { getPendingPublicationCyclePure } from '../services/cycle-lifecycle.service.js'
 import {
   getSchedulingConfig,
   updateSchedulingConfig,
@@ -43,7 +45,8 @@ export const adminRouter = express.Router()
 adminRouter.use(requireAuth)
 
 adminRouter.get('/dashboard', requireRole('admin'), (_req, res) => {
-  const workCycle = getCurrentWorkCyclePure()
+  const workCycle = getCurrentWorkCyclePure() || getPendingPublicationCyclePure()
+  const participationCycle = getCurrentWorkCyclePure() || getUpcomingCyclePure()
   const publicCycle = getCurrentPublicCyclePure()
   const participants = workCycle
     ? db.prepare(`
@@ -78,8 +81,9 @@ adminRouter.get('/dashboard', requireRole('admin'), (_req, res) => {
     completedCount: submissions.filter((item) => item.completed_count === item.required_count).length,
     invalidCount: submissions.filter((item) => item.used_voting_right === 0).length,
     submissions,
-    members: workCycle ? listMembersWithStatus(workCycle.id) : [],
-    users: listUsersForDashboard(workCycle?.id || null)
+    members: participationCycle ? listMembersWithStatus(participationCycle.id) : [],
+    users: listUsersForDashboard(participationCycle?.id || null),
+    participationCycle
   })
 })
 
@@ -101,7 +105,7 @@ adminRouter.get('/leader/current-cycle', requireRole('leader'), (req, res) => {
 
   const members = listMembers(cycle.id)
   const scores = db.prepare(`
-    SELECT target_user_id AS targetUserId, score
+    SELECT target_user_id AS targetUserId, score, updated_at AS updatedAt
     FROM manager_scores
     WHERE cycle_id = ? AND manager_user_id = ?
     ORDER BY target_user_id ASC
@@ -170,7 +174,7 @@ adminRouter.post('/cycles/:id/archive', requireRole('admin'), (req, res) => {
 
 adminRouter.get('/results', requireRole('admin', 'leader'), (req, res) => {
   const cycle = req.user.role === 'leader'
-    ? getCurrentWorkCyclePure()
+    ? (getCurrentWorkCyclePure() || getCurrentPublicCyclePure() || getAdminResultsCycle())
     : (getAdminResultsCycle() || getCurrentWorkCyclePure())
   if (!cycle) return res.status(404).json({ message: '鏆傛棤璇勫垎鍛ㄦ湡' })
 
@@ -222,7 +226,7 @@ adminRouter.patch('/users/:id/active', requireRole('admin'), (req, res) => {
 })
 
 adminRouter.patch('/users/:id/participation', requireRole('admin'), (req, res) => {
-  const cycle = getCurrentWorkCyclePure()
+  const cycle = getCurrentWorkCyclePure() || getUpcomingCyclePure()
   if (!cycle) return res.status(404).json({ message: '鏆傛棤璇勫垎鍛ㄦ湡' })
 
   try {

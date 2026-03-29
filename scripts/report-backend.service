@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/.openclaw/workspace/backend
+WorkingDirectory=/root/report/backend
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/npm run start
 Restart=always

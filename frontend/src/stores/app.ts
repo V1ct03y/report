@@ -14,6 +14,7 @@ import type {
   EmployeeResult,
   EmployeeSubmission,
   Leader,
+  LeaderSubmission,
   MemberRecord,
   PublicMatrixRow,
   Role,
@@ -89,6 +90,7 @@ function normalizeAdminCycle(raw: any): AdminCycleRecord | null {
 function normalizeOverview(raw: any): CycleOverview {
   return {
     publicCycle: normalizeCycle(raw?.publicCycle),
+    pendingPublicationCycle: normalizeCycle(raw?.pendingPublicationCycle),
     workCycle: normalizeCycle(raw?.workCycle),
     displayCycle: normalizeCycle(raw?.displayCycle),
     upcomingCycle: normalizeCycle(raw?.upcomingCycle),
@@ -134,6 +136,9 @@ function formatDeadline(raw?: string | null) {
 }
 
 function stageLabel(overview: CycleOverview) {
+  if (overview.pendingPublicationCycle && overview.displayCycle?.id === overview.pendingPublicationCycle.id) {
+    return `${cycleLabel(overview.pendingPublicationCycle)}待公示`
+  }
   if (overview.publicCycle && overview.displayCycle?.id === overview.publicCycle.id) {
     return `${cycleLabel(overview.publicCycle)}公示`
   }
@@ -144,6 +149,9 @@ function stageLabel(overview: CycleOverview) {
 }
 
 function stageDeadline(overview: CycleOverview) {
+  if (overview.pendingPublicationCycle && overview.displayCycle?.id === overview.pendingPublicationCycle.id) {
+    return formatDeadline(overview.upcomingCycle?.start_at || overview.pendingPublicationCycle.end_at)
+  }
   if (overview.publicCycle && overview.displayCycle?.id === overview.publicCycle.id) {
     return formatDeadline(overview.upcomingCycle?.start_at || overview.publicCycle.end_at)
   }
@@ -151,6 +159,9 @@ function stageDeadline(overview: CycleOverview) {
 }
 
 function stageDeadlineAt(overview: CycleOverview) {
+  if (overview.pendingPublicationCycle && overview.displayCycle?.id === overview.pendingPublicationCycle.id) {
+    return overview.upcomingCycle?.start_at || overview.pendingPublicationCycle.end_at || null
+  }
   if (overview.publicCycle && overview.displayCycle?.id === overview.publicCycle.id) {
     return overview.upcomingCycle?.start_at || overview.publicCycle.end_at || null
   }
@@ -176,6 +187,7 @@ export const useAppStore = defineStore('app', () => {
   const employeeScores = ref<Record<string, ScoreMap>>({})
   const leaderScores = ref<Record<string, Record<string, number>>>({})
   const submissions = ref<Record<string, EmployeeSubmission>>({})
+  const leaderSubmissions = ref<Record<string, LeaderSubmission>>({})
   const results = ref<EmployeeResult[]>([])
   const publicMatrixRows = ref<PublicMatrixRow[]>([])
   const cycleSummary = ref<CycleSummary>({
@@ -212,7 +224,18 @@ export const useAppStore = defineStore('app', () => {
 
   const currentLeader = computed(() => {
     const leaderId = currentAccount.value?.linkedLeaderId
-    return leaderList.value.find((leader) => leader.id === leaderId) ?? null
+    const matchedLeader = leaderList.value.find((leader) => leader.id === leaderId)
+    if (matchedLeader) return matchedLeader
+
+    if (currentAccount.value?.role === 'leader' && leaderId) {
+      return {
+        id: leaderId,
+        name: currentAccount.value.displayName,
+        label: currentAccount.value.displayName
+      }
+    }
+
+    return null
   })
 
   const employeeDraftComplete = computed(() => {
@@ -336,6 +359,22 @@ export const useAppStore = defineStore('app', () => {
       }))
   }
 
+  function ensureCurrentLeaderEntry() {
+    if (currentAccount.value?.role !== 'leader' || !currentAccount.value.linkedLeaderId) return
+
+    const leaderId = currentAccount.value.linkedLeaderId
+    if (leaderList.value.some((leader) => leader.id === leaderId)) return
+
+    leaderList.value = [
+      ...leaderList.value,
+      {
+        id: leaderId,
+        name: currentAccount.value.displayName,
+        label: currentAccount.value.displayName
+      }
+    ]
+  }
+
   async function loadCycleOverview() {
     const payload = await api.getCycleOverview()
     syncOverview(payload)
@@ -371,6 +410,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function loadLeaderCycle() {
+    ensureCurrentLeaderEntry()
     const payload = await api.getLeaderCurrentCycle()
     cycle.value = normalizeCycle(payload?.cycle)
     employeeList.value = mapPeople(payload?.members || [])
@@ -378,8 +418,22 @@ export const useAppStore = defineStore('app', () => {
 
     if (currentLeader.value) {
       leaderScores.value[currentLeader.value.id] = {}
+      let latestSavedAt: string | null = null
       for (const row of payload?.scores || []) {
         leaderScores.value[currentLeader.value.id][String(row.targetUserId)] = Number(row.score)
+        if (row.updatedAt && (!latestSavedAt || row.updatedAt > latestSavedAt)) {
+          latestSavedAt = row.updatedAt
+        }
+      }
+
+      const savedCount = Array.isArray(payload?.scores) ? payload.scores.length : 0
+      const requiredCount = employeeList.value.length
+      leaderSubmissions.value[currentLeader.value.id] = {
+        savedCount,
+        requiredCount,
+        submittedAt: latestSavedAt,
+        isEffective: savedCount > 0,
+        isComplete: requiredCount > 0 && savedCount === requiredCount
       }
     }
 
@@ -656,6 +710,7 @@ export const useAppStore = defineStore('app', () => {
     employeeScores,
     leaderList,
     leaderScores,
+    leaderSubmissions,
     submissions,
     results,
     cycleSummary,

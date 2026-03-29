@@ -56,6 +56,12 @@ const router = createRouter({
       name: 'supervisor-scoring',
       component: () => import('../views/SupervisorScoringView.vue'),
       meta: { title: '组长评分录入页', requiresAuth: true, role: 'leader' }
+    },
+    {
+      path: '/supervisor/status',
+      name: 'supervisor-status',
+      component: () => import('../views/SupervisorStatusView.vue'),
+      meta: { title: '组长评分状态', requiresAuth: true, role: 'leader' }
     }
   ]
 })

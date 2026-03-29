@@ -30,6 +30,14 @@ export interface EmployeeSubmission {
   submittedAt: string | null
 }
 
+export interface LeaderSubmission {
+  savedCount: number
+  requiredCount: number
+  submittedAt: string | null
+  isEffective: boolean
+  isComplete: boolean
+}
+
 export type CycleStatus = 'draft' | 'active' | 'closed' | 'settled'
 export type AdminCyclePhase = 'planned' | 'open' | 'closed' | 'settled' | 'published' | 'archived'
 export type ScoreMap = Record<string, number | null>
@@ -61,6 +69,7 @@ export interface AdminCycleRecord extends CycleRecord {
 
 export interface CycleOverview {
   publicCycle: CycleRecord | null
+  pendingPublicationCycle?: CycleRecord | null
   workCycle: CycleRecord | null
   displayCycle: CycleRecord | null
   upcomingCycle: CycleRecord | null

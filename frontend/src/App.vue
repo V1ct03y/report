@@ -31,6 +31,7 @@ const navItems = computed(() => {
   if (currentAccount.value.role === 'leader') {
     return [
       { label: '组长评分录入', to: '/supervisor/scoring' },
+      { label: '组长评分状态', to: '/supervisor/status' },
       { label: '结果公示', to: '/public/results' },
       { label: '往期留存', to: '/archive/history' }
     ]

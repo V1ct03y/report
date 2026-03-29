@@ -42,6 +42,12 @@ const riskyDetailText = computed(() => (
 ))
 
 const hasWorkCycle = computed(() => Boolean(cycleOverview.value.workCycle))
+const participationTargetCycle = computed(() => cycleOverview.value.workCycle || cycleOverview.value.upcomingCycle || null)
+const participationColumnLabel = computed(() => (
+  cycleOverview.value.workCycle
+    ? '本期参与'
+    : (participationTargetCycle.value ? `下期参与（${resolveCycleName(participationTargetCycle.value)}）` : '参与资格')
+))
 const editingCycle = computed(() => (
   allCycles.value.find((cycle) => cycle.id === editingCycleId.value) ?? null
 ))
@@ -118,6 +124,23 @@ function canPublishCycle(cycle: CycleRecord) {
 
 function canArchiveCycle(cycle: CycleRecord) {
   return resolveCyclePhase(cycle) === 'published'
+}
+
+function submissionText(user: { role: Role; submitted_at?: string | null }) {
+  if (!user.submitted_at) return '未提交'
+  return user.submitted_at
+}
+
+function votingStatusText(user: { role: Role; completed_count?: number; required_count?: number; used_voting_right?: number }) {
+  if (user.role === 'leader') {
+    const completedCount = Number(user.completed_count || 0)
+    const requiredCount = Number(user.required_count || 0)
+    if (completedCount === 0) return '未生效'
+    if (requiredCount > 0 && completedCount >= requiredCount) return `已保存 ${completedCount}/${requiredCount}`
+    return `部分保存 ${completedCount}/${requiredCount}`
+  }
+
+  return user.used_voting_right === 1 ? '有效' : '未生效'
 }
 
 function startEditCycle(cycle: CycleRecord) {
@@ -391,7 +414,7 @@ onMounted(() => {
             <th>姓名</th>
             <th>账号</th>
             <th>角色</th>
-            <th>本期参与</th>
+            <th>{{ participationColumnLabel }}</th>
             <th>提交时间</th>
             <th>投票权</th>
             <th>账号状态</th>
@@ -418,7 +441,7 @@ onMounted(() => {
                 <select
                   class="select-input select-input--compact"
                   :value="user.is_participant !== 0 ? 'participating' : 'not_participating'"
-                  :disabled="!hasWorkCycle"
+                  :disabled="!participationTargetCycle"
                   @change="handleParticipationChange(user.id, ($event.target as HTMLSelectElement).value === 'participating')"
                 >
                   <option value="participating">参与</option>
@@ -427,8 +450,8 @@ onMounted(() => {
               </template>
               <span v-else class="select-input select-input--compact select-input--readonly">不适用</span>
             </td>
-            <td>{{ user.submitted_at ?? '未提交' }}</td>
-            <td>{{ user.used_voting_right === 1 ? '有效' : '未生效' }}</td>
+            <td>{{ submissionText(user) }}</td>
+            <td>{{ votingStatusText(user) }}</td>
             <td>{{ user.is_active === 1 ? '启用' : '停用' }}</td>
             <td>
               <button class="secondary-button" type="button" @click="handleActiveToggle(user.id, user.is_active)">

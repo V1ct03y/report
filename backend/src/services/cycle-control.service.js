@@ -3,6 +3,7 @@ import {
   currentSqlTimestamp,
   getCycleById,
   getCycleOverviewPure,
+  getPendingPublicationCyclePure,
   reconcileCycleTimeline
 } from './cycle-lifecycle.service.js'
 
@@ -28,15 +29,7 @@ function toAdminCycle(cycle, now = currentSqlTimestamp()) {
 
 export function getAdminCycleControl(now = currentSqlTimestamp()) {
   const overview = getCycleOverviewPure(now)
-  const pendingPublicationCycle = db.prepare(`
-    SELECT * FROM rating_cycles
-    WHERE status = 'settled'
-      AND COALESCE(published_at, public_at) IS NULL
-      AND archived_at IS NULL
-      AND COALESCE(is_archived, 0) = 0
-    ORDER BY settled_at DESC, week_number DESC, id DESC
-    LIMIT 1
-  `).get()
+  const pendingPublicationCycle = getPendingPublicationCyclePure()
 
   return {
     currentCycle: toAdminCycle(overview.workCycle, now),

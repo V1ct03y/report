@@ -310,20 +310,37 @@ export function listCycleHistory() {
   return listCycleHistoryPure()
 }
 
-export function getCurrentWorkCyclePure() {
+export function getPendingPublicationCyclePure() {
   return withPublicationState(
     db.prepare(`
-      SELECT * FROM rating_cycles
-      WHERE status IN ('draft', 'active', 'closed')
-      ORDER BY week_number ASC, id ASC
+      SELECT *
+      FROM rating_cycles
+      WHERE status = 'settled'
+        AND COALESCE(published_at, public_at) IS NULL
+        AND archived_at IS NULL
+        AND COALESCE(is_archived, 0) = 0
+      ORDER BY COALESCE(settled_at, updated_at) DESC, week_number DESC, id DESC
       LIMIT 1
     `).get() || null
   )
 }
 
+export function getCurrentWorkCyclePure(now = currentSqlTimestamp()) {
+  return withPublicationState(
+    db.prepare(`
+      SELECT * FROM rating_cycles
+      WHERE status IN ('draft', 'active', 'closed')
+        AND start_at IS NOT NULL
+        AND start_at <= ?
+      ORDER BY week_number ASC, id ASC
+      LIMIT 1
+    `).get(now) || null
+  )
+}
+
 export function getCurrentWorkCycle(now = currentSqlTimestamp()) {
   normalizeCycleStatuses(now)
-  return getCurrentWorkCyclePure()
+  return getCurrentWorkCyclePure(now)
 }
 
 export function getCurrentPublicCyclePure() {
@@ -345,8 +362,9 @@ export function getCurrentPublicCycle() {
 }
 
 export function getDisplayCyclePure(now = currentSqlTimestamp()) {
+  const pendingPublicationCycle = getPendingPublicationCyclePure()
   const publicCycle = getCurrentPublicCyclePure()
-  const workCycle = getCurrentWorkCyclePure()
+  const workCycle = getCurrentWorkCyclePure(now)
   const hasStartedWorkPhase = Boolean(
     workCycle &&
     workCycle.start_at &&
@@ -358,11 +376,15 @@ export function getDisplayCyclePure(now = currentSqlTimestamp()) {
     return workCycle
   }
 
+  if (pendingPublicationCycle) {
+    return pendingPublicationCycle
+  }
+
   if (publicCycle) {
     return publicCycle
   }
 
-  return workCycle
+  return getUpcomingCyclePure(now)
 }
 
 export function getDisplayCycle(now = currentSqlTimestamp()) {
@@ -370,16 +392,14 @@ export function getDisplayCycle(now = currentSqlTimestamp()) {
 }
 
 export function getUpcomingCyclePure(now = currentSqlTimestamp()) {
-  const workCycle = getCurrentWorkCyclePure()
-  if (!workCycle) return null
-
   return withPublicationState(
     db.prepare(`
       SELECT * FROM rating_cycles
-      WHERE week_number > ?
+      WHERE start_at IS NOT NULL
+        AND start_at > ?
       ORDER BY week_number ASC, id ASC
       LIMIT 1
-    `).get(workCycle.week_number) || null
+    `).get(now) || null
   )
 }
 
@@ -417,13 +437,15 @@ export function archiveOlderPublicCycles(keepCycleId) {
 }
 
 export function getCycleOverviewPure(now = currentSqlTimestamp()) {
+  const pendingPublicationCycle = getPendingPublicationCyclePure()
   const publicCycle = getCurrentPublicCyclePure()
-  const workCycle = getCurrentWorkCyclePure()
+  const workCycle = getCurrentWorkCyclePure(now)
   const upcomingCycle = getUpcomingCyclePure(now)
   const history = listCycleHistoryPure()
 
   return {
     publicCycle,
+    pendingPublicationCycle,
     workCycle,
     displayCycle: getDisplayCyclePure(now),
     upcomingCycle,

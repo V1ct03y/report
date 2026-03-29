@@ -1,6 +1,6 @@
 import { db } from '../db/client.js'
 import { hashPassword } from '../utils/crypto.js'
-import { getCurrentWorkCyclePure } from './cycle-lifecycle.service.js'
+import { getCurrentWorkCyclePure, getPendingPublicationCyclePure } from './cycle-lifecycle.service.js'
 
 const VALID_ROLES = new Set(['admin', 'leader', 'member'])
 
@@ -11,7 +11,7 @@ function normalizeRole(role) {
 }
 
 export function listUsersForDashboard(cycleId = null) {
-  const activeCycleId = cycleId || getCurrentWorkCyclePure()?.id || null
+  const activeCycleId = cycleId || getCurrentWorkCyclePure()?.id || getPendingPublicationCyclePure()?.id || null
 
   return db.prepare(`
     SELECT u.id,
@@ -21,17 +21,52 @@ export function listUsersForDashboard(cycleId = null) {
            u.is_active,
            u.created_at,
            COALESCE(cp.is_participant, 1) AS is_participant,
-           s.completed_count,
-           s.required_count,
-           s.used_voting_right,
-           s.submitted_at
+           CASE
+             WHEN u.role = 'leader' THEN COALESCE(ms.saved_count, 0)
+             ELSE s.completed_count
+           END AS completed_count,
+           CASE
+             WHEN u.role = 'leader' THEN COALESCE(req.required_count, 0)
+             ELSE s.required_count
+           END AS required_count,
+           CASE
+             WHEN u.role = 'leader' THEN CASE
+               WHEN COALESCE(ms.saved_count, 0) > 0 THEN 1
+               ELSE 0
+             END
+             ELSE s.used_voting_right
+           END AS used_voting_right,
+           CASE
+             WHEN u.role = 'leader' THEN ms.submitted_at
+             ELSE s.submitted_at
+           END AS submitted_at
     FROM users u
     LEFT JOIN cycle_participants cp
       ON cp.user_id = u.id AND cp.cycle_id = ?
     LEFT JOIN employee_score_submissions s
       ON s.user_id = u.id AND s.cycle_id = ?
+    LEFT JOIN (
+      SELECT cycle_id,
+             manager_user_id,
+             COUNT(*) AS saved_count,
+             MAX(updated_at) AS submitted_at
+      FROM manager_scores
+      GROUP BY cycle_id, manager_user_id
+    ) ms
+      ON ms.manager_user_id = u.id AND ms.cycle_id = ?
+    LEFT JOIN (
+      SELECT ? AS cycle_id,
+             COUNT(*) AS required_count
+      FROM users u2
+      LEFT JOIN cycle_participants cp2
+        ON cp2.user_id = u2.id AND cp2.cycle_id = ?
+      WHERE u2.role = 'member'
+        AND u2.is_active = 1
+        AND COALESCE(cp2.is_participant, 1) = 1
+    ) req
+      ON req.cycle_id = ?
     ORDER BY u.id ASC
-  `).all(activeCycleId, activeCycleId)
+  `).all(activeCycleId, activeCycleId, activeCycleId, activeCycleId, activeCycleId, activeCycleId)
 }
 
 export function createMember({ username, fullName, password }) {

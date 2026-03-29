@@ -13,7 +13,7 @@ if (fs.existsSync(dbFile)) {
 
 const { db } = await import('../src/db/client.js')
 const { initializeDatabase } = await import('../src/db/bootstrap.js')
-initializeDatabase({ mode: 'acceptance' })
+initializeDatabase({ mode: 'acceptance', now: new Date('2026-03-27T12:00:00+08:00') })
 const { updateCycle, deleteCycle } = await import('../src/services/cycle-admin.service.js')
 
 function countDraftCycles() {
