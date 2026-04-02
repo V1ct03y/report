@@ -14,13 +14,18 @@ if (fs.existsSync(dbFile)) {
 const { db } = await import('../src/db/client.js')
 const { initializeDatabase } = await import('../src/db/bootstrap.js')
 initializeDatabase({ mode: 'acceptance' })
-const { currentSqlTimestamp, seedWeeklyCycles } = await import('../src/services/cycle-lifecycle.service.js')
+const {
+  currentSqlTimestamp,
+  seedWeeklyCycles,
+  ensurePlannedCycleWindow,
+  reconcileCycleTimeline
+} = await import('../src/services/cycle-lifecycle.service.js')
 const { getSchedulingConfig, getNextScheduledEvents, updateSchedulingConfig } = await import('../src/services/scheduling.service.js')
 const { createCycle } = await import('../src/services/cycle-admin.service.js')
 
-function resetCycles() {
+function resetCycles(now = new Date('2026-03-27T12:00:00+08:00')) {
   db.prepare('DELETE FROM rating_cycles').run()
-  seedWeeklyCycles()
+  seedWeeklyCycles(now)
 }
 
 function clearSchedulingConfig() {
@@ -75,4 +80,94 @@ test('createCycle normalizes datetime-local strings into SQL timestamps', () => 
 
   assert.equal(created.start_at, '2026-09-01 20:00:00')
   assert.equal(created.end_at, '2026-09-03 20:00:00')
+})
+
+test('seedWeeklyCycles derives cycle windows from scheduling_config', () => {
+  clearSchedulingConfig()
+  getSchedulingConfig()
+  updateSchedulingConfig({
+    enabled: 1,
+    open_day: 3,
+    open_hour: 20,
+    open_minute: 0,
+    close_day: 5,
+    close_hour: 20,
+    close_minute: 0,
+    auto_settle: 1
+  })
+
+  resetCycles(new Date('2026-03-27T12:00:00+08:00'))
+
+  const rows = db.prepare(`
+    SELECT week_number, start_at, end_at, status
+    FROM rating_cycles
+    WHERE week_number IN (3, 4)
+    ORDER BY week_number ASC
+  `).all()
+
+  assert.deepEqual(rows, [
+    {
+      week_number: 3,
+      start_at: '2026-03-25 20:00:00',
+      end_at: '2026-03-27 20:00:00',
+      status: 'active'
+    },
+    {
+      week_number: 4,
+      start_at: '2026-04-01 20:00:00',
+      end_at: '2026-04-03 20:00:00',
+      status: 'draft'
+    }
+  ])
+})
+
+test('automatic draft cycles realign to the configured schedule before reconciliation', () => {
+  clearSchedulingConfig()
+  getSchedulingConfig()
+  updateSchedulingConfig({
+    enabled: 1,
+    open_day: 3,
+    open_hour: 20,
+    open_minute: 0,
+    close_day: 5,
+    close_hour: 20,
+    close_minute: 0,
+    auto_settle: 1
+  })
+
+  db.prepare('DELETE FROM rating_cycles').run()
+  db.prepare(`
+    INSERT INTO rating_cycles (
+      name, week_number, start_at, end_at, status, settled_at, public_at, published_at, is_archived, archived_at, settle_mode
+    )
+    VALUES
+      ('第3周工作评分', 3, '2026-03-26 21:10:00', '2026-03-29 21:10:00', 'settled', '2026-03-29 13:20:47', '2026-03-29 13:27:58', '2026-03-29 13:27:58', 0, NULL, 'manual'),
+      ('第4周工作评分', 4, '2026-04-02 21:10:00', '2026-04-04 21:10:00', 'draft', NULL, NULL, NULL, 0, NULL, 'automatic'),
+      ('第5周工作评分', 5, '2026-04-09 21:10:00', '2026-04-11 21:10:00', 'draft', NULL, NULL, NULL, 0, NULL, 'automatic')
+  `).run()
+
+  ensurePlannedCycleWindow(2, '2026-04-02 10:30:00')
+  reconcileCycleTimeline('2026-04-02 10:30:00')
+
+  const rows = db.prepare(`
+    SELECT week_number, start_at, end_at, status
+    FROM rating_cycles
+    WHERE week_number IN (4, 5)
+    ORDER BY week_number ASC
+  `).all()
+
+  assert.deepEqual(rows, [
+    {
+      week_number: 4,
+      start_at: '2026-04-01 20:00:00',
+      end_at: '2026-04-03 20:00:00',
+      status: 'active'
+    },
+    {
+      week_number: 5,
+      start_at: '2026-04-08 20:00:00',
+      end_at: '2026-04-10 20:00:00',
+      status: 'draft'
+    }
+  ])
 })

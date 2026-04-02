@@ -1,50 +1,19 @@
 import cron from 'node-cron'
 import { db } from '../db/client.js'
 import { currentSqlTimestamp, reconcileCycleTimeline } from './cycle-lifecycle.service.js'
+import { ensureSchedulingConfigTable, getPersistedSchedulingConfig } from './schedule-config.store.js'
 
 export function getSchedulingConfig() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS scheduling_config (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      enabled INTEGER NOT NULL DEFAULT 1,
-      open_day INTEGER NOT NULL DEFAULT 3,
-      open_hour INTEGER NOT NULL DEFAULT 20,
-      open_minute INTEGER NOT NULL DEFAULT 0,
-      close_day INTEGER NOT NULL DEFAULT 5,
-      close_hour INTEGER NOT NULL DEFAULT 20,
-      close_minute INTEGER NOT NULL DEFAULT 0,
-      auto_settle INTEGER NOT NULL DEFAULT 1,
-      last_auto_open_at TEXT,
-      last_auto_close_at TEXT,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `)
-
-  const row = db.prepare('SELECT * FROM scheduling_config WHERE id = 1').get()
-  if (row) return row
-
-  db.prepare(`
-    INSERT INTO scheduling_config (
-      id,
-      enabled,
-      open_day,
-      open_hour,
-      open_minute,
-      close_day,
-      close_hour,
-      close_minute,
-      auto_settle
-    )
-    VALUES (1, 1, 3, 20, 0, 5, 20, 0, 1)
-  `).run()
-
-  return getSchedulingConfig()
+  return getPersistedSchedulingConfig()
 }
 
 export function updateSchedulingConfig(patch) {
   const allowed = ['enabled', 'open_day', 'open_hour', 'open_minute', 'close_day', 'close_hour', 'close_minute', 'auto_settle']
   const fields = []
   const values = []
+
+  ensureSchedulingConfigTable()
+  getPersistedSchedulingConfig()
 
   for (const [key, value] of Object.entries(patch)) {
     if (!allowed.includes(key)) continue
@@ -58,6 +27,7 @@ export function updateSchedulingConfig(patch) {
   values.push(1)
   db.prepare(`UPDATE scheduling_config SET ${fields.join(', ')} WHERE id = ?`).run(...values)
 
+  reconcileCycleTimeline(currentSqlTimestamp())
   return getSchedulingConfig()
 }
 

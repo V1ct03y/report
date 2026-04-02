@@ -1,7 +1,7 @@
 import { db } from '../db/client.js'
+import { getPersistedSchedulingConfig } from './schedule-config.store.js'
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
-const CYCLE_DURATION_MS = 2 * 24 * 60 * 60 * 1000
 
 function makeWeekName(weekNumber) {
   return `\u7b2c${weekNumber}\u5468\u5de5\u4f5c\u8bc4\u5206`
@@ -46,26 +46,62 @@ export function normalizeLocalDateTimeInput(raw) {
   return normalized.slice(0, 19)
 }
 
-function getWeekAnchor(now = new Date()) {
-  const local = new Date(now)
-  const day = local.getDay()
-  const daysSinceWednesday = (day + 4) % 7
-  const anchor = new Date(
+function toISOWeekday(date) {
+  const day = date.getDay()
+  return day === 0 ? 7 : day
+}
+
+function getCycleSchedule() {
+  return getPersistedSchedulingConfig()
+}
+
+function getScheduledOccurrence(reference, targetDay, targetHour, targetMinute) {
+  const local = new Date(reference)
+  local.setSeconds(0, 0)
+  const todayWeekday = toISOWeekday(local)
+  const dayOffset = targetDay - todayWeekday
+
+  return new Date(
     local.getFullYear(),
     local.getMonth(),
-    local.getDate(),
-    21,
-    10,
+    local.getDate() + dayOffset,
+    targetHour,
+    targetMinute,
     0,
     0
   )
-  anchor.setDate(anchor.getDate() - daysSinceWednesday)
+}
+
+function getCycleDurationMs(config = getCycleSchedule()) {
+  const reference = new Date(2026, 0, 5, 12, 0, 0, 0)
+  const openAt = getScheduledOccurrence(reference, Number(config.open_day), Number(config.open_hour), Number(config.open_minute))
+  const closeAt = getScheduledOccurrence(reference, Number(config.close_day), Number(config.close_hour), Number(config.close_minute))
+
+  if (closeAt.getTime() <= openAt.getTime()) {
+    closeAt.setDate(closeAt.getDate() + 7)
+  }
+
+  return closeAt.getTime() - openAt.getTime()
+}
+
+function getWeekAnchor(now = new Date(), config = getCycleSchedule()) {
+  const local = new Date(now)
+  const anchor = getScheduledOccurrence(local, Number(config.open_day), Number(config.open_hour), Number(config.open_minute))
 
   if (local.getTime() < anchor.getTime()) {
     anchor.setDate(anchor.getDate() - 7)
   }
 
   return anchor
+}
+
+function buildCycleWindowFromStart(start, config = getCycleSchedule()) {
+  const startAt = new Date(start)
+  const endAt = new Date(startAt.getTime() + getCycleDurationMs(config))
+  return {
+    start_at: formatSqlTime(startAt),
+    end_at: formatSqlTime(endAt)
+  }
 }
 
 export function currentSqlTimestamp(now = new Date()) {
@@ -123,24 +159,125 @@ function insertPlannedCycle(...params) {
   `).run(...params)
 }
 
-function deriveNextPlannedCycle(previousCycle) {
+function deriveNextPlannedCycle(previousCycle, config = getCycleSchedule()) {
   const nextStart = new Date(parseSqlTime(previousCycle.start_at).getTime() + WEEK_MS)
-  const nextEnd = new Date(nextStart.getTime() + CYCLE_DURATION_MS)
+  return buildCycleWindowFromStart(nextStart, config)
+}
 
-  return {
-    start_at: formatSqlTime(nextStart),
-    end_at: formatSqlTime(nextEnd)
+function getCurrentOpenSlotStart(now = new Date(), config = getCycleSchedule()) {
+  const recentOpen = getWeekAnchor(now, config)
+  const windowEnd = new Date(recentOpen.getTime() + getCycleDurationMs(config))
+  return now.getTime() < windowEnd.getTime()
+    ? recentOpen
+    : new Date(recentOpen.getTime() + WEEK_MS)
+}
+
+function getNextScheduledOpenAfter(after, config = getCycleSchedule()) {
+  const anchor = new Date(after)
+  anchor.setSeconds(0, 0)
+
+  const candidate = getScheduledOccurrence(
+    anchor,
+    Number(config.open_day),
+    Number(config.open_hour),
+    Number(config.open_minute)
+  )
+
+  if (candidate.getTime() <= anchor.getTime()) {
+    candidate.setDate(candidate.getDate() + 7)
   }
+
+  return candidate
+}
+
+function alignAutomaticDraftCycles(now = currentSqlTimestamp(), config = getCycleSchedule()) {
+  const cycles = listCycles()
+  if (!cycles.length) return []
+
+  const lockedCycles = cycles
+    .filter((cycle) => (
+      cycle.settle_mode === 'manual'
+      || cycle.status === 'settled'
+      || cycle.settled_at
+      || cycle.public_at
+      || cycle.published_at
+      || cycle.archived_at
+      || Number(cycle.is_archived) === 1
+    ))
+    .sort((a, b) => (a.week_number - b.week_number) || (a.id - b.id))
+
+  const lockedWeekNumber = lockedCycles.length
+    ? Number(lockedCycles[lockedCycles.length - 1].week_number || 0)
+    : 0
+
+  const automaticCycles = cycles
+    .filter((cycle) => (
+      cycle.settle_mode !== 'manual'
+      && ['draft', 'active', 'closed'].includes(cycle.status)
+      && !cycle.settled_at
+      && !cycle.public_at
+      && !cycle.published_at
+      && !cycle.archived_at
+      && Number(cycle.is_archived) !== 1
+      && Number(cycle.week_number || 0) > lockedWeekNumber
+    ))
+    .sort((a, b) => (a.week_number - b.week_number) || (a.id - b.id))
+
+  if (!automaticCycles.length) return []
+
+  const resolvedNow = typeof now === 'string' ? parseSqlTime(now) : new Date(now)
+  const baseWeekNumber = Number(automaticCycles[0].week_number || (lockedWeekNumber + 1))
+  const latestLockedCycle = lockedCycles.length ? lockedCycles[lockedCycles.length - 1] : null
+  const baseStart = latestLockedCycle
+    ? getNextScheduledOpenAfter(
+      parseSqlTime(
+        latestLockedCycle.published_at
+        || latestLockedCycle.public_at
+        || latestLockedCycle.end_at
+        || latestLockedCycle.settled_at
+        || latestLockedCycle.start_at
+      ) || resolvedNow,
+      config
+    )
+    : getCurrentOpenSlotStart(resolvedNow, config)
+
+  const updates = []
+  const tx = db.transaction(() => {
+    for (const cycle of automaticCycles) {
+      const offsetWeeks = Number(cycle.week_number || 0) - baseWeekNumber
+      const expectedStart = new Date(baseStart.getTime() + offsetWeeks * WEEK_MS)
+      const expectedWindow = buildCycleWindowFromStart(expectedStart, config)
+
+      if (cycle.start_at === expectedWindow.start_at && cycle.end_at === expectedWindow.end_at) {
+        continue
+      }
+
+      db.prepare(`
+        UPDATE rating_cycles
+        SET start_at = ?,
+            end_at = ?,
+            status = 'draft',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(expectedWindow.start_at, expectedWindow.end_at, cycle.id)
+
+      updates.push({ ...cycle, ...expectedWindow, status: 'draft' })
+    }
+  })
+
+  tx()
+  return updates.map(withPublicationState)
 }
 
 export function seedWeeklyCycles(now = new Date()) {
+  const config = getCycleSchedule()
   const count = db.prepare('SELECT COUNT(*) as count FROM rating_cycles').get().count
   if (count > 1) return
 
   db.prepare('DELETE FROM rating_cycles').run()
 
-  const currentStart = getWeekAnchor(now)
-  const currentEnd = new Date(currentStart.getTime() + CYCLE_DURATION_MS)
+  const currentStart = getWeekAnchor(now, config)
+  const currentEnd = new Date(currentStart.getTime() + getCycleDurationMs(config))
   const currentStatus = now.getTime() >= currentEnd.getTime() ? 'closed' : 'active'
 
   const weeks = [
@@ -151,12 +288,11 @@ export function seedWeeklyCycles(now = new Date()) {
   ]
 
   for (const week of weeks) {
-    const startAt = formatSqlTime(week.start)
-    const endAt = formatSqlTime(new Date(week.start.getTime() + CYCLE_DURATION_MS))
+    const { start_at: startAt, end_at: endAt } = buildCycleWindowFromStart(week.start, config)
     const settledAt = week.status === 'settled' ? endAt : null
     const publishedAt = week.published ? endAt : null
     const archivedAt = week.archived
-      ? formatSqlTime(new Date(week.start.getTime() + CYCLE_DURATION_MS + 60 * 60 * 1000))
+      ? formatSqlTime(new Date(parseSqlTime(endAt).getTime() + 60 * 60 * 1000))
       : null
 
     insertPlannedCycle(
@@ -174,15 +310,16 @@ export function seedWeeklyCycles(now = new Date()) {
     )
   }
 
-  ensurePlannedCycleWindow(20)
+  ensurePlannedCycleWindow(20, currentSqlTimestamp(now))
 }
 
 export function seedProductionCycles(now = new Date()) {
+  const config = getCycleSchedule()
   const count = db.prepare('SELECT COUNT(*) as count FROM rating_cycles').get().count
   if (count > 0) return
 
-  const currentStart = getWeekAnchor(now)
-  const currentEnd = new Date(currentStart.getTime() + CYCLE_DURATION_MS)
+  const currentStart = getWeekAnchor(now, config)
+  const currentEnd = new Date(currentStart.getTime() + getCycleDurationMs(config))
   const currentStatus = now.getTime() >= currentEnd.getTime() ? 'closed' : 'active'
 
   insertPlannedCycle(
@@ -199,10 +336,13 @@ export function seedProductionCycles(now = new Date()) {
     'automatic'
   )
 
-  ensurePlannedCycleWindow(20)
+  ensurePlannedCycleWindow(20, currentSqlTimestamp(now))
 }
 
-export function ensurePlannedCycleWindow(targetDraftCount = 20) {
+export function ensurePlannedCycleWindow(targetDraftCount = 20, now = currentSqlTimestamp()) {
+  const config = getCycleSchedule()
+  alignAutomaticDraftCycles(now, config)
+
   const cycles = listCycles()
   if (!cycles.length) return []
 
@@ -214,7 +354,7 @@ export function ensurePlannedCycleWindow(targetDraftCount = 20) {
 
   while (futureDrafts.length + created.length < targetDraftCount) {
     const nextWeekNumber = Number(anchor.week_number || 0) + 1
-    const nextCycle = deriveNextPlannedCycle(anchor)
+    const nextCycle = deriveNextPlannedCycle(anchor, config)
     insertPlannedCycle(
       makeWeekName(nextWeekNumber),
       nextWeekNumber,
@@ -240,7 +380,7 @@ export function ensureUpcomingCycle() {
 }
 
 export function reconcileCycleTimeline(now = currentSqlTimestamp()) {
-  ensurePlannedCycleWindow(20)
+  ensurePlannedCycleWindow(20, now)
 
   const tx = db.transaction(() => {
     db.prepare(`
@@ -332,7 +472,13 @@ export function getCurrentWorkCyclePure(now = currentSqlTimestamp()) {
       WHERE status IN ('draft', 'active', 'closed')
         AND start_at IS NOT NULL
         AND start_at <= ?
-      ORDER BY week_number ASC, id ASC
+      ORDER BY CASE status
+        WHEN 'active' THEN 0
+        WHEN 'closed' THEN 1
+        ELSE 2
+      END ASC,
+      week_number DESC,
+      id DESC
       LIMIT 1
     `).get(now) || null
   )

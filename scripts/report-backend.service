@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 WorkingDirectory=/root/report/backend
 Environment=NODE_ENV=production
+Environment=TZ=Asia/Hong_Kong
 ExecStart=/usr/bin/npm run start
 Restart=always
 RestartSec=3
