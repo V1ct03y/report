@@ -244,6 +244,10 @@ function alignAutomaticDraftCycles(now = currentSqlTimestamp(), config = getCycl
   const updates = []
   const tx = db.transaction(() => {
     for (const cycle of automaticCycles) {
+      if (cycle.status !== 'draft') {
+        continue
+      }
+
       const offsetWeeks = Number(cycle.week_number || 0) - baseWeekNumber
       const expectedStart = new Date(baseStart.getTime() + offsetWeeks * WEEK_MS)
       const expectedWindow = buildCycleWindowFromStart(expectedStart, config)

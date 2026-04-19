@@ -1,5 +1,6 @@
 import { db } from '../db/client.js'
 import {
+  currentSqlTimestamp,
   ensurePlannedCycleWindow,
   listCycles,
   normalizeLocalDateTimeInput,
@@ -33,6 +34,12 @@ export function listAllCycles() {
   return listCycles()
 }
 
+function deriveEditableCycleStatus(startAt, endAt, now = currentSqlTimestamp()) {
+  if (startAt && startAt > now) return 'draft'
+  if (endAt && endAt <= now) return 'closed'
+  return 'active'
+}
+
 export function createCycle({ name, start_at, end_at }) {
   const maxWeek = db.prepare('SELECT MAX(week_number) as m FROM rating_cycles').get()?.m || 0
   const resolvedName = name || makeWeekName(maxWeek + 1)
@@ -51,13 +58,14 @@ export function createCycle({ name, start_at, end_at }) {
   return db.prepare('SELECT * FROM rating_cycles WHERE id = ?').get(result.lastInsertRowid)
 }
 
-export function updateCycle(id, { name, start_at, end_at }) {
+export function updateCycle(id, { name, start_at, end_at }, now = currentSqlTimestamp()) {
   const cycle = db.prepare('SELECT * FROM rating_cycles WHERE id = ?').get(id)
   if (!cycle) throw new Error('周期不存在')
   if (cycle.status === 'settled') throw new Error('已结算的周期无法修改')
 
   const nextStartAt = start_at !== undefined ? normalizeLocalDateTimeInput(start_at) : cycle.start_at
   const nextEndAt = end_at !== undefined ? normalizeLocalDateTimeInput(end_at) : cycle.end_at
+  const touchesSchedule = start_at !== undefined || end_at !== undefined
 
   assertNoCycleOverlap(id, nextStartAt, nextEndAt)
 
@@ -75,19 +83,25 @@ export function updateCycle(id, { name, start_at, end_at }) {
     fields.push('end_at = ?')
     values.push(nextEndAt)
   }
+  if (touchesSchedule) {
+    fields.push('settle_mode = ?')
+    values.push('manual')
+    fields.push('status = ?')
+    values.push(deriveEditableCycleStatus(nextStartAt, nextEndAt, now))
+  }
   if (!fields.length) return cycle
 
   fields.push('updated_at = CURRENT_TIMESTAMP')
   values.push(id)
   db.prepare(`UPDATE rating_cycles SET ${fields.join(', ')} WHERE id = ?`).run(...values)
 
-  ensurePlannedCycleWindow(20)
-  reconcileCycleTimeline()
+  ensurePlannedCycleWindow(20, now)
+  reconcileCycleTimeline(now)
 
   return db.prepare('SELECT * FROM rating_cycles WHERE id = ?').get(id)
 }
 
-export function deleteCycle(id) {
+export function deleteCycle(id, now = currentSqlTimestamp()) {
   const cycle = db.prepare('SELECT * FROM rating_cycles WHERE id = ?').get(id)
   if (!cycle) throw new Error('周期不存在')
   if (cycle.status === 'settled') throw new Error('已结算的周期无法删除')
@@ -97,8 +111,8 @@ export function deleteCycle(id) {
 
   db.prepare('DELETE FROM rating_cycles WHERE id = ?').run(id)
 
-  ensurePlannedCycleWindow(20)
-  reconcileCycleTimeline()
+  ensurePlannedCycleWindow(20, now)
+  reconcileCycleTimeline(now)
 
   return { ok: true }
 }

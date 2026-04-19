@@ -6,7 +6,13 @@ import path from 'node:path'
 const root = process.cwd()
 
 function readPort(filePath, pattern) {
-  const content = fs.readFileSync(path.join(root, filePath), 'utf8')
+  const candidates = [
+    path.join(root, filePath),
+    path.join(root, '..', filePath)
+  ]
+  const resolved = candidates.find((candidate) => fs.existsSync(candidate))
+  assert.ok(resolved, `Could not find ${filePath}`)
+  const content = fs.readFileSync(resolved, 'utf8')
   const match = content.match(pattern)
   assert.ok(match, `Could not extract port from ${filePath}`)
   return Number(match[1])

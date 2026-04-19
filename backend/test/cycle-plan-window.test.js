@@ -16,6 +16,8 @@ const { initializeDatabase } = await import('../src/db/bootstrap.js')
 initializeDatabase({ mode: 'acceptance', now: new Date('2026-03-27T12:00:00+08:00') })
 const { updateCycle, deleteCycle } = await import('../src/services/cycle-admin.service.js')
 
+const FIXED_NOW = '2026-03-27 12:00:00'
+
 function countDraftCycles() {
   return db.prepare("SELECT COUNT(*) AS count FROM rating_cycles WHERE status = 'draft'").get().count
 }
@@ -45,7 +47,7 @@ test('deleting a future draft cycle refills the 20-cycle window', () => {
   assert.ok(target)
 
   const before = countDraftCycles()
-  deleteCycle(target.id)
+  deleteCycle(target.id, FIXED_NOW)
   const after = countDraftCycles()
 
   assert.equal(before, 20)
@@ -65,7 +67,7 @@ test('updating a draft cycle rejects overlap with adjacent cycles', () => {
     () => updateCycle(target.id, {
       start_at: '2026-04-07T21:10',
       end_at: '2026-04-10T21:10'
-    }),
+    }, FIXED_NOW),
     /overlap|冲突/i
   )
 })

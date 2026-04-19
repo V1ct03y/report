@@ -52,9 +52,68 @@ const editingCycle = computed(() => (
   allCycles.value.find((cycle) => cycle.id === editingCycleId.value) ?? null
 ))
 
+const adminCurrentWorkLabel = computed(() => (
+  adminCycleControl.value.currentCycle
+    ? resolveCycleName(adminCycleControl.value.currentCycle)
+    : '暂无'
+))
+
+const adminCurrentPeriodText = computed(() => {
+  const cycle = adminCycleControl.value.currentCycle
+  if (!cycle?.start_at || !cycle?.end_at) return '暂无周期时间'
+  return `${formatCycleDate(cycle.start_at)} - ${formatCycleDate(cycle.end_at)}`
+})
+
+const adminStageLabel = computed(() => {
+  if (adminCycleControl.value.pendingPublicationCycle) {
+    return `${resolveCycleName(adminCycleControl.value.pendingPublicationCycle)}待公示`
+  }
+
+  if (adminCycleControl.value.currentCycle) {
+    return `${resolveCycleName(adminCycleControl.value.currentCycle)}评分`
+  }
+
+  if (adminCycleControl.value.publishedCycle) {
+    return `${resolveCycleName(adminCycleControl.value.publishedCycle)}公示`
+  }
+
+  if (adminCycleControl.value.upcomingCycle) {
+    return `${resolveCycleName(adminCycleControl.value.upcomingCycle)}待开始`
+  }
+
+  return '未设置阶段'
+})
+
+const adminStageDeadline = computed(() => {
+  if (adminCycleControl.value.pendingPublicationCycle) {
+    return formatExactDate(
+      adminCycleControl.value.upcomingCycle?.start_at
+      || adminCycleControl.value.pendingPublicationCycle.end_at
+    )
+  }
+
+  if (adminCycleControl.value.currentCycle) {
+    return formatExactDate(adminCycleControl.value.currentCycle.end_at)
+  }
+
+  if (adminCycleControl.value.publishedCycle) {
+    return formatExactDate(
+      adminCycleControl.value.upcomingCycle?.start_at
+      || adminCycleControl.value.publishedCycle.end_at
+    )
+  }
+
+  return formatExactDate(adminCycleControl.value.upcomingCycle?.start_at || null)
+})
+
 function formatCycleDate(raw: string | null) {
   if (!raw) return '未设置'
   return dayjs(raw).format('MM/DD HH:mm')
+}
+
+function formatExactDate(raw: string | null) {
+  if (!raw) return '未设置截止时间'
+  return dayjs(raw).format('YYYY-MM-DD HH:mm:ss.SSS')
 }
 
 function resolveCycleName(cycle: CycleRecord) {
@@ -157,14 +216,20 @@ function cancelEditCycle() {
 
 async function saveCycle() {
   if (!editingCycleId.value) return
+  const originalStart = editingCycle.value?.start_at ? dayjs(editingCycle.value.start_at).format('YYYY-MM-DDTHH:mm') : ''
+  const originalEnd = editingCycle.value?.end_at ? dayjs(editingCycle.value.end_at).format('YYYY-MM-DDTHH:mm') : ''
   const candidateStart = editForm.start_at || editingCycle.value?.start_at || ''
   const candidateEnd = editForm.end_at || editingCycle.value?.end_at || ''
   const now = dayjs()
-  const movesIntoPast = [candidateStart, candidateEnd].some((value) => value && dayjs(value).isBefore(now))
+  const changedPastDates = [
+    editForm.start_at && editForm.start_at !== originalStart ? editForm.start_at : '',
+    editForm.end_at && editForm.end_at !== originalEnd ? editForm.end_at : ''
+  ].filter((value) => value && dayjs(value).isBefore(now))
+  const movesIntoPast = changedPastDates.length > 0
 
   if (movesIntoPast) {
     const confirmed = window.confirm(
-      '这个周期时间早于当前时间。保存后系统会立即按当前时间推进状态，可能直接变成进行中、待结算或待公示。确定继续吗？'
+      '你这次修改的开始时间或截止时间已早于当前时间。保存后系统会立即按当前时间重算阶段，可能变成待开始、评分中或待结算。确定继续吗？'
     )
     if (!confirmed) return
   }
@@ -264,8 +329,8 @@ onMounted(() => {
       <div class="kpi-strip">
         <article class="kpi-item">
           <span class="kpi-item__label">当前工作周期</span>
-          <strong class="kpi-item__value">{{ cycleSummary.workLabel }}</strong>
-          <p class="kpi-item__detail">{{ cycleSummary.currentPeriodText }}</p>
+          <strong class="kpi-item__value">{{ adminCurrentWorkLabel }}</strong>
+          <p class="kpi-item__detail">{{ adminCurrentPeriodText }}</p>
         </article>
         <article class="kpi-item">
           <span class="kpi-item__label">成员提交进度</span>
@@ -301,8 +366,8 @@ onMounted(() => {
         <div class="overview-grid">
           <article class="surface-card overview-card">
             <span class="overview-card__label">当前阶段</span>
-            <strong>{{ cycleSummary.stageLabel }}</strong>
-            <p>{{ cycleSummary.deadlineExact }}</p>
+            <strong>{{ adminStageLabel }}</strong>
+            <p>{{ adminStageDeadline }}</p>
           </article>
 
           <article class="surface-card overview-card">

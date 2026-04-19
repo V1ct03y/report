@@ -21,7 +21,7 @@ const {
   reconcileCycleTimeline
 } = await import('../src/services/cycle-lifecycle.service.js')
 const { getSchedulingConfig, getNextScheduledEvents, updateSchedulingConfig } = await import('../src/services/scheduling.service.js')
-const { createCycle } = await import('../src/services/cycle-admin.service.js')
+const { createCycle, updateCycle } = await import('../src/services/cycle-admin.service.js')
 
 function resetCycles(now = new Date('2026-03-27T12:00:00+08:00')) {
   db.prepare('DELETE FROM rating_cycles').run()
@@ -170,4 +170,84 @@ test('automatic draft cycles realign to the configured schedule before reconcili
       status: 'draft'
     }
   ])
+})
+
+test('manually extending the current cycle keeps its custom end time after reconciliation', () => {
+  clearSchedulingConfig()
+  getSchedulingConfig()
+  updateSchedulingConfig({
+    enabled: 1,
+    open_day: 3,
+    open_hour: 21,
+    open_minute: 30,
+    close_day: 7,
+    close_hour: 21,
+    close_minute: 30,
+    auto_settle: 1
+  })
+
+  db.prepare('DELETE FROM rating_cycles').run()
+  db.prepare(`
+    INSERT INTO rating_cycles (
+      name, week_number, start_at, end_at, status, settled_at, public_at, published_at, is_archived, archived_at, settle_mode
+    )
+    VALUES
+      ('第4周工作评分', 4, '2026-04-01 21:30:00', '2026-04-06 21:30:00', 'settled', '2026-04-07 12:05:15', '2026-04-07 12:05:20', '2026-04-07 12:05:20', 1, '2026-04-10 00:28:31', 'manual'),
+      ('第5周工作评分', 5, '2026-04-08 21:30:00', '2026-04-10 21:30:00', 'active', NULL, NULL, NULL, 0, NULL, 'automatic'),
+      ('第6周工作评分', 6, '2026-04-15 21:30:00', '2026-04-17 21:30:00', 'draft', NULL, NULL, NULL, 0, NULL, 'automatic')
+  `).run()
+
+  const week5 = db.prepare('SELECT id FROM rating_cycles WHERE week_number = 5').get()
+  assert.ok(week5)
+
+  updateCycle(week5.id, { end_at: '2026-04-12T21:30' }, '2026-04-10 21:40:00')
+  reconcileCycleTimeline('2026-04-10 21:40:00')
+
+  const week5After = db.prepare(`
+    SELECT week_number, end_at, status, settle_mode
+    FROM rating_cycles
+    WHERE week_number = 5
+  `).get()
+
+  assert.deepEqual(week5After, {
+    week_number: 5,
+    end_at: '2026-04-12 21:30:00',
+    status: 'active',
+    settle_mode: 'manual'
+  })
+})
+
+test('manually extending a closed cycle reopens it when the new end time is in the future', () => {
+  clearSchedulingConfig()
+  getSchedulingConfig()
+  updateSchedulingConfig({
+    enabled: 1,
+    open_day: 3,
+    open_hour: 21,
+    open_minute: 30,
+    close_day: 7,
+    close_hour: 21,
+    close_minute: 30,
+    auto_settle: 1
+  })
+
+  db.prepare('DELETE FROM rating_cycles').run()
+  db.prepare(`
+    INSERT INTO rating_cycles (
+      name, week_number, start_at, end_at, status, settled_at, public_at, published_at, is_archived, archived_at, settle_mode
+    )
+    VALUES
+      ('第4周工作评分', 4, '2026-04-01 21:30:00', '2026-04-06 21:30:00', 'settled', '2026-04-07 12:05:15', '2026-04-07 12:05:20', '2026-04-07 12:05:20', 1, '2026-04-10 00:28:31', 'manual'),
+      ('第5周工作评分', 5, '2026-04-08 21:30:00', '2026-04-10 21:30:00', 'closed', NULL, NULL, NULL, 0, NULL, 'automatic'),
+      ('第6周工作评分', 6, '2026-04-15 21:30:00', '2026-04-17 21:30:00', 'draft', NULL, NULL, NULL, 0, NULL, 'automatic')
+  `).run()
+
+  const week5 = db.prepare('SELECT id FROM rating_cycles WHERE week_number = 5').get()
+  assert.ok(week5)
+
+  const updated = updateCycle(week5.id, { end_at: '2026-04-12T21:30' }, '2026-04-10 21:40:00')
+
+  assert.equal(updated.end_at, '2026-04-12 21:30:00')
+  assert.equal(updated.status, 'active')
+  assert.equal(updated.settle_mode, 'manual')
 })
